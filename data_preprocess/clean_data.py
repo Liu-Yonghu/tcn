@@ -1,0 +1,228 @@
+import os
+import pandas as pd
+import numpy as np
+
+def read_data(file_path, sensor):
+    # read CSV file
+    try:
+        if sensor.lower() == 'radar':
+            df = pd.read_csv(file_path, header=None, names=['angle', 'range', 'magnitude', 'timestamp'])
+        else:
+            df = pd.read_csv(file_path)
+        print(f'the size of this dataset: {df.shape}')
+        return df
+    except Exception as e:
+        print(f'Failed to load data: {e}')
+
+
+def data_extract(df, sensor):
+    #extract the the useful fields which we want
+    data = []
+    timestamp = 0
+    if sensor.lower() == 'tof':
+
+        distance_cols = [col for col in df.columns if col.startswith('distance')]
+        signal_cols = [col for col in df.columns if col.startswith("signal_per_spad")]
+        valid_cols = [col for col in df.columns if col.startswith(".is_valid_range")]
+        timestamp_cols = [col for col in df.columns if col.startswith(".HostTimestamp")]
+
+        # features = df[distance_cols].values.astype(np.float32)
+        # signals = df[signal_cols].values.astype(np.float32)  # probably used later
+        # valid = df[valid_cols].values.astype(np.float32)
+        # timestamp = df[timestamp_cols].values.astype((np.float32))
+        #
+        # data = np.concatenate([timestamp, features, valid], axis=1)
+
+        data = pd.concat([df[timestamp_cols], df[distance_cols], df[valid_cols]], axis=1)
+
+    elif sensor.lower() == 'ultrasound':
+
+        timestamp_cols = [col for col in df.columns if col.startswith("Timestamp")]
+        X_cols = [col for col in df.columns if col.startswith('X')]
+        Y_cols = [col for col in df.columns if col.startswith("Y")]
+
+        data = pd.concat([df[timestamp_cols], df[X_cols], df[Y_cols]], axis=1)
+
+    elif sensor.lower() == 'radar':
+
+        angle_cols = 'angle'
+        range_cols = 'range'
+        max_magnitude_cols = 'magnitude'
+        timestamp_cols = 'timestamp'
+
+
+        angles = [col for col in df.columns if col.startswith(angle_cols)]
+        ranges = [col for col in df.columns if col.startswith(range_cols)]
+        max_magnitudes = [col for col in df.columns if col.startswith(max_magnitude_cols)]
+        timestamp = [col for col in df.columns if col.startswith(timestamp_cols)]
+
+        # angles = df[angle_cols].values.reshape(-1, 1)
+        # ranges = df[range_cols].values.reshape(-1, 1)
+        # max_magnitudes = df[max_magnitude_cols].values.astype(np.float32).reshape(-1, 1)
+        # timestamp = df[timestamp_cols].values.astype(np.float32).reshape(-1, 1)
+        #
+        # data = np.concatenate([timestamp, angles, ranges, max_magnitudes], axis=1)
+        data = pd.concat([df[timestamp_cols], df[angle_cols], df[range_cols], df[max_magnitudes]], axis=1)
+
+    else:
+        print(" no this kind of sensor ")
+    return data
+
+def interpolation_data_by_samples(X):
+    """
+        按照样本行进行插值（即每行内部按64个zone做插值）
+        假设 df 已包含 timestamp、distance_0~63、valid_0~63
+        """
+    timestamp_col = X.columns[0]
+    distance_cols = X.columns[1:65]
+    valid_cols = X.columns[65:]
+
+    interpolated_rows = []
+    for idx, row in X.iterrows():
+        distances = row[distance_cols].astype(float)
+        valids = row[valid_cols].astype(bool)
+
+        # 构建 Series 并插值
+        valids.index = distances.index
+        interpolated = distances.mask(~valids).interpolate(method='linear', limit_direction='both')
+
+        # 合并结果
+        new_row = pd.concat([
+            pd.Series({timestamp_col: row[timestamp_col]}),
+            interpolated,
+        ])
+        interpolated_rows.append(new_row)
+
+    result = pd.DataFrame(interpolated_rows)
+    return result
+
+def interpolation_data_by_field(X):
+    timestamp_col = X.columns[0]
+    distance_cols = X.columns[1:65]
+    valid_cols = X.columns[65:]
+
+    distance_interp = X[distance_cols].copy()
+    valid_mask = X[valid_cols].astype(bool)
+
+    # interpolate on every column
+    for col in distance_cols:
+        valid_col = valid_cols[distance_cols.get_loc(col)]
+        mask = valid_mask[valid_col]
+        distance_interp[col] = X[col].mask(~mask).interpolate(method='linear', limit_direction='both')
+
+    result = pd.concat([X[timestamp_col], distance_interp], axis=1)
+    return result
+
+def save_data(data, labels, filename, method = "interpolated"):
+    timestamp = data.iloc[:, 0]
+    features = data.iloc[:, 1:]
+
+    data_norm = (features - features.min()) / (features.max() - features.min())
+    data_std = (features - features.mean()) / features.std()
+
+    path = 'clean_data/'
+    os.makedirs(path, exist_ok=True)
+
+    data_norm = pd.concat([timestamp, data_norm], axis=1)
+    data_std = pd.concat([timestamp, data_std], axis=1)
+
+    if method == "mean":
+
+        labels_down = downsample_labels(labels, len(data))
+
+        data_norm["X"] = labels_down["X"]
+        data_norm["Y"] = labels_down["Y"]
+
+        data_std["X"] = labels_down["X"]
+        data_std["Y"] = labels_down["Y"]
+
+
+    elif method == "downsample":
+        indices = np.linspace(0, len(labels) - 1, num=len(data), dtype=int)
+        labels_down = labels.iloc[indices].reset_index(drop=True)
+        data_norm = data_norm.reset_index(drop=True)
+        data_std = data_std.reset_index(drop=True)
+
+        # 直接拼接下采样后的标签
+        data_norm["X"] = labels_down["X"]
+        data_norm["Y"] = labels_down["Y"]
+
+        data_std["X"] = labels_down["X"]
+        data_std["Y"] = labels_down["Y"]
+    else:
+        raise ValueError("Unsupported method. Choose from ['mean', 'downsample'].")
+
+    data_norm.to_csv(os.path.join(path, f'norm_{filename}'), index=False, header=True)
+    data_std.to_csv(os.path.join(path, f'std_{filename}'), index=False, header=True)
+    print(f"Saved norm_{filename} and std_{filename} to {path}")
+
+def downsample_labels(labels, target_len):
+    n = len(labels)
+    step = n / target_len
+    averaged_labels = []
+
+    for i in range(target_len):
+        start = int(i * step)
+        end = int((i + 1) * step)
+        chunk = labels.iloc[start:end]
+        averaged = chunk.mean(numeric_only=True)
+        averaged_labels.append(averaged)
+
+    print(len(averaged_labels), target_len)
+    return pd.DataFrame(averaged_labels).reset_index(drop=True)
+
+
+
+if __name__ == '__main__':
+
+    # file_path = input("please input the path of data\n") or  "../raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+    # sensor = input("please input  the kind of sensor\n") or "ToF"
+    #
+    # # file_path = input("please input the path of data\n") or "../raw_data/radar-walking-talha-exp1-10min.csv"
+    # # sensor = input("please input  the kind of sensor\n") or "radar"
+    #
+    # # file_path = input("please input the path of data\n") or "../raw_data/exp1_10min_ultrasound.csv"
+    # # sensor = input("please input  the kind of sensor\n") or "ultrasound"
+    # df = read_data(file_path, sensor)
+    #
+    # raw_features = data_extract(df, sensor)
+    #
+    # print(raw_features.shape)
+    #
+    # raw_features.to_csv('../raw_data/raw.csv', index=False, header=True)
+    #
+    # result = interpolation_data_by_field(raw_features)
+    #
+    # result.to_csv('../raw_data/old.csv', index=False, header=True)
+    # print(result.shape)
+    #
+    # #read ultrasound data as label
+    # file_path = input("please input the path of data\n") or "../raw_data/exp1_10min_ultrasound.csv"
+    # sensor = input("please input  the kind of sensor\n") or "ultrasound"
+    # df = read_data(file_path, sensor)
+    #
+    # labels = data_extract(df, sensor)
+    #
+    # #labels = downsample_labels(labels, len(result))
+    #
+    # print(labels.shape)
+    #
+    # labels.to_csv('../raw_data/labels.csv', index=False, header=True)
+    # save_data(result, labels, 'TOFEXP4', "mean")
+
+    df = pd.read_csv('clean_data/norm_TOFEXP2')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOF2.CSV', index=False, header=False)
+    df = pd.read_csv('clean_data/norm_TOFEXP3')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOF3.CSV', index=False, header=False)
+
+
+
+
+
+
+
+
+
+
+
+

@@ -31,3 +31,7 @@ utils.py:
         - how to compute and save test
         - how to evaluate SPARC
         - other model infos
+# runing demo 
+'''
+python main.py --data_path 'exp_data/TOF1.csv' --output_dir 'results/segment/1'
+'''

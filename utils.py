@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import math
 import os
-import pathlib
+from pathlib import Path
 import pandas as pd
 import sys
 import argparse
@@ -21,7 +21,6 @@ from tensorboard.plugins.hparams import api as hparams_api
 import copy
 from keras import regularizers, optimizers, losses, initializers, metrics
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from keras import backend as K
 from keras import backend as K
 # from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
@@ -115,10 +114,21 @@ def load_dataset_cap(path,file_training,file_valid,file_testing):
 
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
-def load_dataset_ir(path,file_training,file_valid,file_testing):
-    training_data =file_training
-    validation_data = file_valid
-    testing_data = file_testing
+def load_dataset_ir(folder, feature=64):
+    folder_path = Path(folder)
+    filenames = {"train": "train.csv", "valid": "val.csv", "test": "test.csv"}
+
+    files = {}
+    for key, fname in filenames.items():
+        path = folder_path / fname
+        if not path.exists():
+            raise FileNotFoundError(f"文件未找到: {path}")
+        files[key] = path
+
+
+    training_data = files['train']
+    validation_data =files['valid']
+    testing_data =files['test']
     trainList = list()
     valList = list()
     testList = list()
@@ -129,9 +139,9 @@ def load_dataset_ir(path,file_training,file_valid,file_testing):
             trainList.append(rowTr)
 
     trainArray = np.asarray(trainList, dtype=np.float32)
-    #print(trainArray.shape)
-    train_X = trainArray[:, 0:64]
-    train_Y = trainArray[:, 64:]
+    # print(trainArray.shape)
+    train_X = trainArray[:, 0:feature]
+    train_Y = trainArray[:, feature:]
     #####################################
 
     with open(validation_data, 'r') as val_inp_csv:
@@ -140,10 +150,10 @@ def load_dataset_ir(path,file_training,file_valid,file_testing):
             valList.append(rowVl)
 
     valArray = np.asarray(valList, dtype=np.float32)
-    #print(valArray.shape)
-    
-    val_X = valArray[:, 0:64]
-    val_Y = valArray[:, 64:]
+    # print(valArray.shape)
+
+    val_X = valArray[:, 0: feature]
+    val_Y = valArray[:, feature:]
     #####################################
 
     with open(testing_data, 'r') as test_inp_csv:
@@ -152,24 +162,22 @@ def load_dataset_ir(path,file_training,file_valid,file_testing):
             testList.append(rowTe)
 
     testArray = np.asarray(testList, dtype=np.float32)
-    #print(valArray.shape)
-    
-    test_X = testArray[:, 0:64]
-    test_Y = testArray[:, 64:]
+    # print(valArray.shape)
 
+    test_X = testArray[:, 0:feature]
+    test_Y = testArray[:, feature:]
 
-    X_train = np.array(train_X)   #np.transpose(train_X)
-    Y_train = np.array(train_Y)   #np.transpose(train_Y)
- 
+    X_train = np.array(train_X)  # np.transpose(train_X)
+    Y_train = np.array(train_Y)  # np.transpose(train_Y)
 
-    X_val = np.array(val_X)   #np.transpose(test1_X)
-    Y_val = np.array(val_Y)   #np.transpose(test1_Y)
+    X_val = np.array(val_X)  # np.transpose(test1_X)
+    Y_val = np.array(val_Y)  # np.transpose(test1_Y)
 
-    
-    X_test = np.array(test_X)   #np.transpose(test2_X)
-    Y_test = np.array(test_Y)   #np.transpose(test2_Y)
+    X_test = np.array(test_X)  # np.transpose(test2_X)
+    Y_test = np.array(test_Y)  # np.transpose(test2_Y)
 
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
+
 
 def load_dataset_radar(path,file_training,file_valid,file_testing):
     training_data =file_training

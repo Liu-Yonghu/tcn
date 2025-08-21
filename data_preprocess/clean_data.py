@@ -9,16 +9,15 @@ def read_data(file_path, sensor):
             df = pd.read_csv(file_path, header=None, names=['angle', 'range', 'magnitude', 'timestamp'])
         else:
             df = pd.read_csv(file_path)
-        print(f'the size of this dataset: {df.shape}')
+        print(f'the size of this raw dataset: {df.shape}')
         return df
     except Exception as e:
         print(f'Failed to load data: {e}')
 
 
-def data_extract(df, sensor):
+def features_extract(df, sensor):
     #extract the the useful fields which we want
     data = []
-    timestamp = 0
     if sensor.lower() == 'tof':
 
         distance_cols = [col for col in df.columns if col.startswith('distance')]
@@ -62,7 +61,7 @@ def data_extract(df, sensor):
         # timestamp = df[timestamp_cols].values.astype(np.float32).reshape(-1, 1)
         #
         # data = np.concatenate([timestamp, angles, ranges, max_magnitudes], axis=1)
-        data = pd.concat([df[timestamp_cols], df[angle_cols], df[range_cols], df[max_magnitudes]], axis=1)
+        data = pd.concat([df[timestamp_cols], df[angle_cols], df[range_cols], df[max_magnitude_cols]], axis=1)
 
     else:
         print(" no this kind of sensor ")
@@ -128,7 +127,7 @@ def save_data(data, labels, filename, method = "interpolated"):
 
     if method == "mean":
 
-        labels_down = downsample_labels(labels, len(data))
+        labels_down = mean_labels(labels, len(data))
 
         data_norm["X"] = labels_down["X"]
         data_norm["Y"] = labels_down["Y"]
@@ -143,7 +142,7 @@ def save_data(data, labels, filename, method = "interpolated"):
         data_norm = data_norm.reset_index(drop=True)
         data_std = data_std.reset_index(drop=True)
 
-        # 直接拼接下采样后的标签
+        # concat the result
         data_norm["X"] = labels_down["X"]
         data_norm["Y"] = labels_down["Y"]
 
@@ -152,11 +151,11 @@ def save_data(data, labels, filename, method = "interpolated"):
     else:
         raise ValueError("Unsupported method. Choose from ['mean', 'downsample'].")
 
-    data_norm.to_csv(os.path.join(path, f'norm_{filename}'), index=False, header=True)
-    data_std.to_csv(os.path.join(path, f'std_{filename}'), index=False, header=True)
+    data_norm.to_csv(os.path.join(path, f'norm_{filename}.csv'), index=False, header=True)
+    data_std.to_csv(os.path.join(path, f'std_{filename}.csv'), index=False, header=True)
     print(f"Saved norm_{filename} and std_{filename} to {path}")
 
-def downsample_labels(labels, target_len):
+def mean_labels(labels, target_len):
     n = len(labels)
     step = n / target_len
     averaged_labels = []
@@ -171,49 +170,51 @@ def downsample_labels(labels, target_len):
     print(len(averaged_labels), target_len)
     return pd.DataFrame(averaged_labels).reset_index(drop=True)
 
+def running():
+    file_path = input("please input the path of features\n") or  "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+    sensor = input("please input  the kind of sensor\n") or "ToF"
+
+    df = read_data(file_path, sensor)
+    raw_features = features_extract(df, sensor)
+    print(raw_features.shape)
+
+    # to check the extracted features
+    raw_features.to_csv('./raw_data/raw.csv', index=False, header=True)
+
+    result = interpolation_data_by_field(raw_features)
+    result.to_csv('./raw_data/features.csv', index=False, header=True)
+    print(result.shape)
+
+    #read ultrasound data as label
+    file_path = input("please input the path of labels\n") or "./raw_data/exp1_10min_ultrasound.csv"
+    sensor = input("please input  the kind of sensor\n") or "ultrasound"
+    df = read_data(file_path, sensor)
+
+    labels = features_extract(df, sensor)
+
+    print(labels.shape)
+
+    # to check the extracted labels
+    labels.to_csv('./raw_data/labels.csv', index=False, header=True)
+
+    filename = input("please input the name of experiment \n") or "TOFEXP1"
+    save_data(result, labels, filename, "mean")
+
+
 
 
 if __name__ == '__main__':
 
-    # file_path = input("please input the path of data\n") or  "../raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
-    # sensor = input("please input  the kind of sensor\n") or "ToF"
-    #
-    # # file_path = input("please input the path of data\n") or "../raw_data/radar-walking-talha-exp1-10min.csv"
-    # # sensor = input("please input  the kind of sensor\n") or "radar"
-    #
-    # # file_path = input("please input the path of data\n") or "../raw_data/exp1_10min_ultrasound.csv"
-    # # sensor = input("please input  the kind of sensor\n") or "ultrasound"
-    # df = read_data(file_path, sensor)
-    #
-    # raw_features = data_extract(df, sensor)
-    #
-    # print(raw_features.shape)
-    #
-    # raw_features.to_csv('../raw_data/raw.csv', index=False, header=True)
-    #
-    # result = interpolation_data_by_field(raw_features)
-    #
-    # result.to_csv('../raw_data/old.csv', index=False, header=True)
-    # print(result.shape)
-    #
-    # #read ultrasound data as label
-    # file_path = input("please input the path of data\n") or "../raw_data/exp1_10min_ultrasound.csv"
-    # sensor = input("please input  the kind of sensor\n") or "ultrasound"
-    # df = read_data(file_path, sensor)
-    #
-    # labels = data_extract(df, sensor)
-    #
-    # #labels = downsample_labels(labels, len(result))
-    #
-    # print(labels.shape)
-    #
-    # labels.to_csv('../raw_data/labels.csv', index=False, header=True)
-    # save_data(result, labels, 'TOFEXP4', "mean")
+    # running()
 
-    df = pd.read_csv('clean_data/norm_TOFEXP2')
-    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOF2.CSV', index=False, header=False)
-    df = pd.read_csv('clean_data/norm_TOFEXP3')
-    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOF3.CSV', index=False, header=False)
+    df = pd.read_csv('clean_data/std_TOFEXP1.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP1csv', index=False, header=False)
+    df = pd.read_csv('clean_data/std_TOFEXP2.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP2.csv', index=False, header=False)
+    df = pd.read_csv('clean_data/std_TOFEXP3.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP3.csv', index=False, header=False)
+    df = pd.read_csv('clean_data/std_TOFEXP4.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
 
 
 

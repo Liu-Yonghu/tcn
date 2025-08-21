@@ -5,6 +5,7 @@
       <excludeFolder url="file://$MODULE_DIR$/data_preprocess/clean_data" />
       <excludeFolder url="file://$MODULE_DIR$/data_preprocess/raw_data" />
       <excludeFolder url="file://$MODULE_DIR$/results" />
+      <excludeFolder url="file://$MODULE_DIR$/temp" />
     </content>
     <orderEntry type="jdk" jdkName="thesis" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -68,10 +68,6 @@ def features_extract(df, sensor):
     return data
 
 def interpolation_data_by_samples(X):
-    """
-        按照样本行进行插值（即每行内部按64个zone做插值）
-        假设 df 已包含 timestamp、distance_0~63、valid_0~63
-        """
     timestamp_col = X.columns[0]
     distance_cols = X.columns[1:65]
     valid_cols = X.columns[65:]
@@ -170,7 +166,7 @@ def mean_labels(labels, target_len):
     print(len(averaged_labels), target_len)
     return pd.DataFrame(averaged_labels).reset_index(drop=True)
 
-def running():
+def cleaning():
     file_path = input("please input the path of features\n") or  "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
     sensor = input("please input  the kind of sensor\n") or "ToF"
 
@@ -205,10 +201,11 @@ def running():
 
 if __name__ == '__main__':
 
-    # running()
+    # main function to clean data
+    # cleaning()
 
     df = pd.read_csv('clean_data/std_TOFEXP1.csv')
-    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP1csv', index=False, header=False)
+    data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP1.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP2.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP2.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP3.csv')

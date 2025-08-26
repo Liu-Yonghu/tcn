@@ -11,8 +11,12 @@ import matplotlib.pyplot as plt
 import tensorflow.keras.backend as K
 import argparse
 from utils import rmse
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import MeanSquaredError
+import  matplotlib
 
-
+matplotlib.use("TkAgg")
 def create_dataset_window(X_all, Y_all, window_size=20):
     X_list = []
     Y_list = []
@@ -240,6 +244,8 @@ def optimazter(args):
         # create windows
         X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
         X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+
+        # test or ignore
         X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
 
         # create model
@@ -261,6 +267,12 @@ def optimazter(args):
             validation_data=(X_val, Y_val),
             verbose=1
         )
+        # draw trajectory and loss of result and save
+        model.summary()
+        # output = model(X_test)
+        # trajectory_curve(output, Y_test, args)
+        loss_curve(history, args)
+        metrics_curve(history, args)
 
         # 保存该fold最小的val_loss
         min_val_loss = min(history.history['val_loss'])
@@ -287,45 +299,115 @@ def optimazter(args):
 
     print(f"\nResults saved to {result_path}")
 
-    # # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
-    # res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
-    # X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
-    #
-    # # create windows, the default is 20
-    # X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
-    # X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
-    # X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
-    # print(f"The training part shape is: {X_train.shape}, its corresponding labels: {Y_train.shape}")
-    # print(f"The validtion part shape is: {X_val.shape}, its corresponding labels: {Y_val.shape}")
-    # print(f"The test part shape is : {X_test.shape}, its corresponding labels: {Y_test.shape}")
-    #
-    # # create model
-    # if args.model == "simple":
-    #     model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters, k_size=args.kernel_size, dense=args.dense)
-    # elif args.model == "complete":
-    #     model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters, k_size=args.kernel_size, dense=args.dense)
-    #
-    #
-    # # compile the model
-    # model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
-    #
-    # # model trainning
-    # history = model.fit(X_train, Y_train, epochs=args.epochs, batch_size=args.batch_size, validation_data=(X_val, Y_val))
-    #
-    # # test_scores = model.evaluate(X_test, Y_test, verbose=2)
-    # # print("Test loss:", test_scores[0])
-    # # print("Test mae:", test_scores[1])
-    #
-    # # call the model to predict
-    # output = model(X_test)
-    # # print(output[:3, :])
-    # # print("Output shape:", output.shape)
-    #
-    # # draw trajectory and loss of result and save
-    # model.summary()
-    # trajectory_curve(output, Y_test, args)
-    # loss_curve(history, args)
-    # metrics_curve(history, args)
+def optimizer2(args):
+
+    df = pd.read_csv(args.data_path, header=None)
+    print("The whole dataset shape is:", df.shape)
+    # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
+    res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
+    X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+
+    # create windows, the default is 20
+    X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
+    X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+    X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+    print(f"The training part shape is: {X_train.shape}, its corresponding labels: {Y_train.shape}")
+    print(f"The validtion part shape is: {X_val.shape}, its corresponding labels: {Y_val.shape}")
+    print(f"The test part shape is : {X_test.shape}, its corresponding labels: {Y_test.shape}")
+
+    # create model
+    if args.model == "simple":
+        model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters, k_size=args.kernel_size, dense=args.dense)
+    elif args.model == "complete":
+        model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters, k_size=args.kernel_size, dense=args.dense)
+
+
+    # compile the model
+    model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
+
+    # model trainning
+    history = model.fit(X_train, Y_train, epochs=args.epochs, batch_size=args.batch_size, validation_data=(X_val, Y_val))
+
+    # test_scores = model.evaluate(X_test, Y_test, verbose=2)
+    # print("Test loss:", test_scores[0])
+    # print("Test mae:", test_scores[1])
+
+    # call the model to predict
+    output = model(X_test)
+    # print(output[:3, :])
+    # print("Output shape:", output.shape)
+
+    # draw trajectory and loss of result and save
+    model.summary()
+    trajectory_curve(output, Y_test, args)
+    loss_curve(history, args)
+    metrics_curve(history, args)
+
+def train_model(model, train_data, val_data, save_dir="results/exp1",
+                epochs=100, patience=10, lr_patience=5, batch_size=32):
+    """
+    训练 Keras 模型，带 EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    # ---- 回调函数 ----
+    early_stop = EarlyStopping(
+        monitor="val_loss",
+        patience=patience,
+        restore_best_weights=True,
+        verbose=1
+    )
+
+    checkpoint = ModelCheckpoint(
+        filepath=os.path.join(save_dir, "best_model.h5"),
+        monitor="val_loss",
+        save_best_only=True,
+        verbose=1
+    )
+
+    reduce_lr = ReduceLROnPlateau(
+        monitor="val_loss",
+        factor=0.5,
+        patience=lr_patience,
+        verbose=1
+    )
+
+    # ---- 训练 ----
+    if isinstance(train_data, tuple):  # numpy array 输入
+        X_train, Y_train = train_data
+        if isinstance(val_data, tuple):  # numpy 验证集
+            validation_data = val_data
+        else:  # dataset 验证集
+            validation_data = val_data
+        history = model.fit(
+            X_train, Y_train,
+            validation_data=validation_data,
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=[early_stop, checkpoint, reduce_lr],
+            verbose=1
+        )
+    else:  # tf.data.Dataset 输入
+        history = model.fit(
+            train_data,
+            validation_data=val_data,
+            epochs=epochs,
+            callbacks=[early_stop, checkpoint, reduce_lr],
+            verbose=1
+        )
+
+        # ---- 绘制 Loss 曲线 ----
+    plt.figure(figsize=(6,4))
+    plt.plot(history.history["loss"], label="Train Loss")
+    plt.plot(history.history["val_loss"], label="Val Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Training vs Validation Loss")
+    plt.savefig(os.path.join(save_dir, "loss_curve.png"))
+    plt.show()
+
+    return model, history
 
 
 def test(args):
@@ -336,6 +418,34 @@ def test(args):
     res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
     print(res["save_path"])
 
+    X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+
+    X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
+    X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+
+    # 构建你的 TCN 模型
+    if args.model == "simple":
+        model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters,
+                                    k_size=args.kernel_size, dense=args.dense)
+    elif args.model == "complete":
+        model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters,
+                                      k_size=args.kernel_size, dense=args.dense)
+
+    # model.compile(optimizer=Adam(learning_rate=1e-3, decay=1e-5),
+    #               loss=MeanSquaredError(),
+    #               metrics=["mae"])
+    model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
+
+    # 假设 train_dataset 和 val_dataset 已经是 tf.data.Dataset 或 numpy 数据
+    model, history = train_model(
+        model,
+        train_data=(X_train, Y_train),
+        val_data=(X_val, Y_val),
+        save_dir="results/tcn_exp1",
+        epochs=100,
+        patience=10,
+        lr_patience=5
+    )
 
 
 
@@ -348,7 +458,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
 
     # directory structure
-    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP3.csv')
+    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP4.csv')
     parser.add_argument('--output_dir', type=str, default='results/segment/one')
     parser.add_argument('--running_data_dir', type=str, default='temp/')
     parser.add_argument('--folds', type=int, default='1')
@@ -365,16 +475,16 @@ if __name__ == '__main__':
     parser.add_argument('--kernel_size', type=int, default='5')
     parser.add_argument('--dense', type=int, default='32')
     parser.add_argument('--epochs', type=int, default='1')
-    parser.add_argument('--batch_size', type=int, default='64')
+    parser.add_argument('--batch_size', type=int, default='16')
     parser.add_argument('--loss', type=str, default='mse')
     parser.add_argument('--optimizer', type=str, default='adam')
     parser.add_argument('--metrics', nargs='+', type=str, default=[rmse, 'mae'])
     parser.add_argument('--dropout_rate', type=float, default='0.005')
 
     args = parser.parse_args()
-    optimazter(args)
+    #optimazter(args)
 
-    # test(args)
+    test(args)
 
 
 

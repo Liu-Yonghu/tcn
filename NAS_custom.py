@@ -1,8 +1,6 @@
 import os
 import tensorflow as tf
 from sklearn.metrics import classification_report
-import autokeras as ak
-import keras_tuner
 import numpy as np
 import json
 import csv
@@ -16,19 +14,19 @@ import pandas as pd
 import sys
 import argparse
 import glob
-import keras
+from tensorflow import keras
 import keras_tuner
 from tensorboard.plugins.hparams import api as hparams_api
 import copy
-from keras import regularizers, optimizers, losses, initializers, metrics
+from tensorflow.keras import regularizers, optimizers, losses, initializers, metrics
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from keras.models import load_model, model_from_json
-from keras import layers, models
-from keras import backend as K
-from keras.callbacks import Callback
-from keras.callbacks import ModelCheckpoint, EarlyStopping, LambdaCallback
+from tensorflow.keras.models import load_model, model_from_json
+from tensorflow.keras import layers, models
+from tensorflow.keras import backend as K
+from tensorflow.keras.callbacks import Callback
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, LambdaCallback
 from tensorflow.keras.layers import Input, TimeDistributed, Concatenate, Lambda
-from keras import backend as K
+from tensorflow.keras import backend as K
 #from tcn import TCN_model
 from tcn_old import TCN
 from keras_tuner import backend
@@ -63,7 +61,7 @@ input_sequence_length = 15
 output_sequence_length = 1
 
 # Parent Directory path
-parent_dir = "/home-ssd/giorgia/"
+parent_dir = "temp/TOF1/1"
 
 # Path
 path = directory
@@ -187,9 +185,9 @@ def create_tf_dataset(
     return dataset
 
 
-X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "preprocessed-training-Osama.csv",
-                                                              "preprocessed-validation-Osama.csv",
-                                                              "preprocessed-testing-Osama.csv")
+X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "temp/TOF1/1/train.csv",
+                                                              "temp/TOF1/1/val.csv",
+                                                              "temp/TOF1/1/test.csv")
 train_ds = create_tf_dataset(X_train, Y_train, input_sequence_length, output_sequence_length, batch_size)
 val_ds = create_tf_dataset(X_val, Y_val, input_sequence_length, output_sequence_length, batch_size)
 test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)

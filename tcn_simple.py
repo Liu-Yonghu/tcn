@@ -38,8 +38,8 @@ class TCN_model(tf.keras.Model):
                 name=f"{name}_conv_layer_{i}"
             ))
             # Aggiungiamo un LayerNormalization dopo ogni layer di convoluzione
-            self.norm_layers.append(layers.LayerNormalization(axis=-1,name=f"{name}_norm_layer_{i}"))
-            self.act_layers.append(layers.Activation("relu",name= f"{name}_activation_layer_{i}"))
+            self.norm_layers.append(layers.LayerNormalization(axis=-1, name=f"{name}_norm_layer_{i}"))
+            self.act_layers.append(layers.Activation("relu", name= f"{name}_activation_layer_{i}"))
             # Aggiungiamo SpatialDropout1D
             if dropout_rate > 0:
                 self.dropout_layers.append(layers.SpatialDropout1D(rate=dropout_rate, name=f"{name}_dropout_layer_{i}"))

@@ -22,7 +22,6 @@ def model_TCN_simple(hidden,num_filters,k_size,dense, name='tcn'):
                     kernel_size=k_size,
                     dilations=[2 ** i for i in range(hidden)],
                     output_len=1)
-    print("tcn block configure:", model.get_config())
     tcn_out = model(x)
     # tcn_out = TCN_model(num_layers=hidden,
     #                 num_filters=num_filters,
@@ -40,7 +39,7 @@ def model_TCN_complete(hidden,num_filters,k_size,dense, name='tcn'):
     x = layers.Input(shape=(20, 64),name= f"{name}_input")
     tcn_out = TCN(nb_filters=num_filters, kernel_size=k_size, nb_stacks=1, dilations=[2 ** i for i in range(hidden)], padding = 'same', use_skip_connections='True', dropout_rate=0.01, return_sequences=False ,activation='relu', kernel_initializer='glorot_uniform', use_layer_norm= True, name='tcn')(x)
     flatten_out = layers.Flatten()(tcn_out)
-    dense_out1=layers.Dense(dense,name= f"{name}_dense_out_1")(flatten_out)
+    dense_out1 = layers.Dense(dense,name= f"{name}_dense_out_1")(flatten_out)
     dense_out = layers.Dense(2, name= f"{name}_dense_out_2")(dense_out1)
     print("dense_out:", dense_out.shape)
     model = models.Model(x, dense_out,name="tcn_model")

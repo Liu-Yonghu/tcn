@@ -10,17 +10,13 @@ import keras
 import tensorflow as tf
 from sklearn.datasets import load_files
 
-import autokeras as ak
-
 if __name__ == '__main__':
-
-    # np.random.seed(int(time.time()))
     # y_t = np.random.uniform(0.0,3.0, size=(20,2))
     # y_p = np.random.uniform(0.0,3.0, size=(20,2))
     # trajectory(y_p, y_t)
     print(keras.__version__)
     print(tf.__version__)
-    print("GPU Available:", tf.config.list_physical_devices('GPU'))
+    # print("GPU Available:", tf.config.list_physical_devices('GPU'))
 
     # tof_df = pd.read_csv("./clean_data/preprocessed-TOFEXP1.csv")  # 包含 'Timestamp' 列
     # ultra_df = pd.read_csv("./raw_data/exp1_10min_ultrasound.csv")  # 包含 'Timestamp', 'X', 'Y' 列
@@ -48,16 +44,16 @@ if __name__ == '__main__':
     # tof_df['X'] = ultra_X
     # tof_df['Y'] = ultra_Y
     # tof_df.to_csv('./raw_data/www.csv')
-
-    dataset = tf.keras.utils.get_file(
-        fname="aclImdb.tar.gz",
-        origin="http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz",
-        extract=True,
-    )
-
-    # set path to dataset
-    IMDB_DATADIR = os.path.join(os.path.dirname(dataset), "aclImdb")
-    print(IMDB_DATADIR)
+    #
+    # dataset = tf.keras.utils.get_file(
+    #     fname="aclImdb.tar.gz",
+    #     origin="http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz",
+    #     extract=True,
+    # )
+    #
+    # # set path to dataset
+    # IMDB_DATADIR = os.path.join(os.path.dirname(dataset), "aclImdb")
+    # print(IMDB_DATADIR)
 
     # classes = ["pos", "neg"]
     # train_data = load_files(

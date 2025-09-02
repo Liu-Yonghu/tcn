@@ -1,7 +1,6 @@
 results
 temp
 data_preprocess/raw_data
-data_preprocess/clean_data
 .idea/
 autokeras_mlp4tcn_res_exp2_all
 

@@ -57,7 +57,7 @@ else:
 batch_size = 32
 epochs = 3000
 directory = '.'
-input_sequence_length = 15
+input_sequence_length = 20
 output_sequence_length = 1
 
 # Parent Directory path
@@ -71,8 +71,7 @@ if not os.path.exists(path):
     print("Directory '%s' created" % directory)
 
 
-# Caricamento Dataset#
-
+# loading Dataset#
 def load_dataset(path, file_training, file_valid, file_testing):
     training_data = file_training
     validation_data = file_valid
@@ -88,8 +87,8 @@ def load_dataset(path, file_training, file_valid, file_testing):
 
     trainArray = np.asarray(trainList, dtype=np.float32)
     # print(trainArray.shape)
-    train_X = trainArray[:, 0:4]
-    train_Y = trainArray[:, 4:6]
+    train_X = trainArray[:, 0:64]
+    train_Y = trainArray[:, 64:]
     #####################################
 
     with open(validation_data, 'r') as val_inp_csv:
@@ -100,8 +99,8 @@ def load_dataset(path, file_training, file_valid, file_testing):
     valArray = np.asarray(valList, dtype=np.float32)
     # print(valArray.shape)
 
-    val_X = valArray[:, 0:4]
-    val_Y = valArray[:, 4:6]
+    val_X = valArray[:, 0:64]
+    val_Y = valArray[:, 64:]
     #####################################
 
     with open(testing_data, 'r') as test_inp_csv:
@@ -112,8 +111,8 @@ def load_dataset(path, file_training, file_valid, file_testing):
     testArray = np.asarray(testList, dtype=np.float32)
     # print(valArray.shape)
 
-    test_X = testArray[:, 0:4]
-    test_Y = testArray[:, 4:6]
+    test_X = testArray[:, 0:64]
+    test_Y = testArray[:, 64:]
 
     X_train = np.array(train_X)  # np.transpose(train_X)
     Y_train = np.array(train_Y)  # np.transpose(train_Y)
@@ -127,41 +126,9 @@ def load_dataset(path, file_training, file_valid, file_testing):
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
 
-def create_tf_dataset(
-        data_array: np.ndarray,
-        output_array: np.ndarray,
-        input_sequence_length: int,
-        output_sequence_length: int,
-        batch_size: int = 1,
-        shuffle=False,
-        multi_horizon=False,
-):
-    """Creates tensorflow dataset from numpy array.
-
-    This function creates a dataset where each element is a tuple `(inputs, targets)`.
-    `inputs` is a Tensor
-    of shape `(batch_size, input_sequence_length, num_routes, 1)` containing
-    the `input_sequence_length` past values of the timeseries for each node.
-    `targets` is a Tensor of shape `(batch_size, forecast_horizon, num_routes)`
-    containing the `forecast_horizon`
-    future values of the timeseries for each node.
-
-    Args:
-        data_array: np.ndarray with shape `(num_time_steps, num_routes)`
-        input_sequence_length: Length of the input sequence (in number of timesteps).
-        forecast_horizon: If `multi_horizon=True`, the target will be the values of the timeseries for 1 to
-            `forecast_horizon` timesteps ahead. If `multi_horizon=False`, the target will be the value of the
-            timeseries `forecast_horizon` steps ahead (only one value).
-        batch_size: Number of timeseries samples in each batch.
-        shuffle: Whether to shuffle output samples, or instead draw them in chronological order.
-        multi_horizon: See `forecast_horizon`.
-
-    Returns:
-        A tf.data.Dataset instance.
-    """
-
+def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1, shuffle=False):
     inputs = timeseries_dataset_from_array(
-        np.expand_dims(data_array[:-2, :], axis=-1),
+        data_array[:-2, :],
         None,
         sequence_length=input_sequence_length,
         shuffle=False,
@@ -194,7 +161,7 @@ test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequen
 
 
 def model_TCN(hidden, num_filters, k_size, dense):
-    x = layers.Input(shape=(15, 4))
+    x = layers.Input(shape=(20, 64))
     tcn_out = TCN(nb_filters=num_filters, kernel_size=k_size, nb_stacks=1, dilations=[2 ** i for i in range(hidden)],
                   padding='same', use_skip_connections='True', dropout_rate=0.01, return_sequences=False,
                   activation='relu', kernel_initializer='glorot_uniform', use_layer_norm=True, name='tcn')(x)
@@ -211,7 +178,7 @@ def model_TCN(hidden, num_filters, k_size, dense):
 class MyHyperModel(keras_tuner.HyperModel):
     def build(self, hp):
         # Supponiamo che mlp_model sia la tua MLP già allenata e tcn_model sia la TCN
-        x = Input(shape=(15, 4))
+        x = Input(shape=(20, 64))
         tcn_model = model_TCN(hp.Choice("hidden", [2, 3, 4]), hp.Choice("nb_filters", [8, 16, 32]),
                               hp.Choice("k_size", [2, 3, 4, 5]), hp.Choice("dense", [8, 16, 32]))
         # Inserisci la sequenza concatenata nella TCN

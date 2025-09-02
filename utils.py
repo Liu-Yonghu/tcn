@@ -140,7 +140,7 @@ def load_dataset_ir(folder, feature=64):
 
     trainArray = np.asarray(trainList, dtype=np.float32)
     # print(trainArray.shape)
-    train_X = trainArray[:, 0:feature]
+    train_X = trainArray[: , 0:feature]
     train_Y = trainArray[:, feature:]
     #####################################
 
@@ -152,7 +152,7 @@ def load_dataset_ir(folder, feature=64):
     valArray = np.asarray(valList, dtype=np.float32)
     # print(valArray.shape)
 
-    val_X = valArray[:, 0: feature]
+    val_X = valArray[:, 0:feature]
     val_Y = valArray[:, feature:]
     #####################################
 

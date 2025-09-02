@@ -41,7 +41,6 @@ def check_one_frame(frame, isHandled=False):
 
     ax.set_title("Row-major reshape (default)")
     plt.colorbar(im, ax=ax)
-
     plt.show()
 
 
@@ -50,8 +49,10 @@ def normalize_ground_truth(coords, room_size=(3.0, 3.0)):
 
 def animate_trajectory(coords, interval=50, save_path=None):
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_xlim(coords[:, 0].min() - 0.05, coords[:, 0].max() + 0.05)
-    ax.set_ylim(coords[:, 1].min() - 0.05, coords[:, 1].max() + 0.05)
+    # ax.set_xlim(coords[:, 0].min() - 0.05, coords[:, 0].max() + 0.05)
+    # ax.set_ylim(coords[:, 1].min() - 0.05, coords[:, 1].max() + 0.05)
+    ax.set_xlim(0, 3)
+    ax.set_ylim(0, 3)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_title("Ground Truth Trajectory Animation")
@@ -83,7 +84,53 @@ def animate_trajectory(coords, interval=50, save_path=None):
     plt.show()
     return ani
 
+def analyze_dataset(file_path, name="dataset", jump_thresh=0.3):
+    df = pd.read_csv(file_path, names=["t", "X", "Y", "valid"])
+    df["X"] = pd.to_numeric(df["X"], errors="coerce")
+    df["Y"] = pd.to_numeric(df["Y"], errors="coerce")
+    df = df.dropna()
 
+    # basic info
+    N = len(df)
+    x_stats = df["X"].agg(["min", "max", "mean", "std"])
+    y_stats = df["Y"].agg(["min", "max", "mean", "std"])
+
+    # noise/jump detection
+    dx = df["X"].diff()
+    dy = df["Y"].diff()
+    dist = np.sqrt(dx**2 + dy**2)
+    jump_ratio = (dist > jump_thresh).mean()
+
+    print(f"===== {name} =====")
+    print(f"total frames: {N}")
+    print(f"x coordinate: {x_stats.to_dict()}")
+    print(f"y coordinate: {y_stats.to_dict()}")
+    print(f"mean shift: {dist.mean():.4f}, max shift: {dist.max():.4f}")
+    print(f"Jump ratio (> {jump_thresh}): {jump_ratio:.2%}")
+
+    return df, dist
+
+def compare_datasets(file1, file2, name1="Dataset A", name2="Dataset B", jump_thresh=0.3):
+    df1, dist1 = analyze_dataset(file1, name1, jump_thresh)
+    df2, dist2 = analyze_dataset(file2, name2, jump_thresh)
+
+    # 绘制轨迹对比
+    plt.figure(figsize=(10, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(df1["X"], df1["Y"], "b.", alpha=0.5, label=name1)
+    plt.plot(df2["X"], df2["Y"], "r.", alpha=0.5, label=name2)
+    plt.legend()
+    plt.title("Trajectory Distribution")
+
+    # 绘制位移直方图
+    plt.subplot(1, 2, 2)
+    plt.hist(dist1.dropna(), bins=50, alpha=0.5, label=name1)
+    plt.hist(dist2.dropna(), bins=50, alpha=0.5, label=name2)
+    plt.legend()
+    plt.title("Step Distance Distribution")
+
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     # data = pd.read_csv('./clean_data/norm_tof1_.csv', usecols=range(1, 65)).to_numpy()
@@ -96,12 +143,25 @@ if __name__ == "__main__":
     # data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
     # frames = (data/1000).reshape(-1, 8, 8)
 
-    # data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
-    # frames = (data).reshape(-1, 8, 8)
-    # isHandled = True
-    #
-    # check_one_frame(data[0], isHandled)
-    # animate_depth(frames, isHandled)
+    data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
+    frames = (data).reshape(-1, 8, 8)
+    isHandled = True
+
+    check_one_frame(data[0], isHandled)
+    animate_depth(frames, isHandled)
 
     labels = pd.read_csv('../exp_data/std_TOFEXP4.csv', usecols=range(64, 66)).to_numpy()
-    animate_trajectory(labels, interval=50)
+    print(labels.shape)
+    recordmin = []
+    recordmax = []
+    for idx, row in enumerate(labels):
+        if (row[0]< 0) or (row[1] < 0):
+            recordmin.append((idx, row))
+        if (row[0] > 3) or (row[1] > 3):
+            recordmax.append((idx, row))
+
+    print(recordmin)
+    print(recordmax)
+    animate_trajectory(labels, interval=30)
+
+    compare_datasets("./raw_data/exp3_1h_ultrasound.csv", "./raw_data/exp4_1h_ultrasound.csv", jump_thresh=0.3)

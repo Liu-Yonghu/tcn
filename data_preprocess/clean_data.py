@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import numpy as np
-
 def read_data(file_path, sensor):
     # read CSV file
     try:
@@ -166,9 +165,22 @@ def mean_labels(labels, target_len):
     print(len(averaged_labels), target_len)
     return pd.DataFrame(averaged_labels).reset_index(drop=True)
 
-def cleaning():
-    file_path = input("please input the path of features\n") or  "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
-    sensor = input("please input  the kind of sensor\n") or "ToF"
+def cleaning(exp):
+    # default
+    file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+    sensor = "ToF"
+    if exp == 1:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+        sensor = "ToF"
+    elif exp == 2:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_122238.csv"
+        sensor = "ToF"
+    elif exp == 3:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_145832.csv"
+        sensor = "ToF"
+    elif exp == 4:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_164900.csv"
+        sensor = "ToF"
 
     df = read_data(file_path, sensor)
     raw_features = features_extract(df, sensor)
@@ -182,8 +194,27 @@ def cleaning():
     print(result.shape)
 
     #read ultrasound data as label
-    file_path = input("please input the path of labels\n") or "./raw_data/exp1_10min_ultrasound.csv"
-    sensor = input("please input  the kind of sensor\n") or "ultrasound"
+    file_path = "./raw_data/exp1_10min_ultrasound.csv"
+    sensor = "ultrasound"
+    filename = "TOFEXP1"
+
+    if exp == 1:
+        file_path = "./raw_data/exp1_10min_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP1"
+    elif exp == 2:
+        file_path = "./raw_data/exp2_30min_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP2"
+    elif exp == 3:
+        file_path = "./raw_data/exp3_1h_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP3"
+    elif exp == 4:
+        file_path = "./raw_data/exp4_1h_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP4"
+
     df = read_data(file_path, sensor)
 
     labels = features_extract(df, sensor)
@@ -192,17 +223,80 @@ def cleaning():
 
     # to check the extracted labels
     labels.to_csv('./raw_data/labels.csv', index=False, header=True)
-
-    filename = input("please input the name of experiment \n") or "TOFEXP1"
     save_data(result, labels, filename, "mean")
 
+def clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3, stuck_thresh=1e-3, stuck_len=16):
+    df = df.copy()
+    N = len(df)
+    df["valid_mask"] = 1
+
+    #ensure it is a number
+    df["X"] = pd.to_numeric(df["X"], errors="coerce")
+    df["Y"] = pd.to_numeric(df["Y"], errors="coerce")
+
+    print("===== Step 1: Boundary Check =====")
+    out_range = (df["X"] < range_min) | (df["X"] > range_max) | (df["Y"] < range_min) | (df["Y"] > range_max)
+    if out_range.any():
+        print("Detected boundary anomalies: ")
+        print(df.loc[out_range, ["Timestamp", "X", "Y"]])
+    df.loc[out_range, "valid_mask"] = 0
+
+    print("===== Step 2: Jump Detection =====")
+    dx = df["X"].diff()
+    dy = df["Y"].diff()
+    dist = np.sqrt(dx**2 + dy**2)
+    jump_mask = dist > jump_thresh
+    if jump_mask.any():
+        print("Detected jump anomalies: ")
+        print(df.loc[jump_mask, ["Timestamp", "X", "Y"]])
+    df.loc[jump_mask, "valid_mask"] = 0
+
+    print("===== Step 3: Stagnation Detection =====")
+    for i in range(N - stuck_len):
+        segment_x = df["X"].iloc[i:i+stuck_len]
+        segment_y = df["Y"].iloc[i:i+stuck_len]
+        if segment_x.std() < stuck_thresh and segment_y.std() < stuck_thresh:
+            print(f"Detected stagnation anomalies: index {i} ~ {i+stuck_len-1}")
+            df.loc[i:i+stuck_len-1, "valid_mask"] = 0
+
+    # 4. replace by NaN
+    df.loc[df["valid_mask"] == 0, ["X", "Y"]] = np.nan
+    df.loc[df["valid_mask"] == 0, "valid_mask"] = 1
+
+    # 5. interpolation fixing
+    df["X"] = df["X"].interpolate(method="linear", limit_direction="both")
+    df["Y"] = df["Y"].interpolate(method="linear", limit_direction="both")
+    return df
+
+def fix_ultraSound_trajectory():
+    df = read_data("./raw_data/exp1_10min_ultrasound.csv", "ultrasound")
+    df1 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
+    df1.to_csv("./raw_data/exp1_10min_ultrasound.csv", index=False)
+
+    df = read_data("./raw_data/exp2_30min_ultrasound.csv", "ultrasound")
+    df2 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
+    df2.to_csv("./raw_data/exp2_30min_ultrasound.csv", index=False)
+
+    df = read_data("./raw_data/exp3_1h_ultrasound.csv", "ultrasound")
+    df3 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
+    df3.to_csv("./raw_data/exp3_1h_ultrasound.csv", index=False)
+
+    df = read_data("./raw_data/exp4_1h_ultrasound.csv", "ultrasound")
+    df4 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
+    df4.to_csv("./raw_data/exp4_1h_ultrasound.csv", index=False)
 
 
 
 if __name__ == '__main__':
 
+    # Check ultrasound trajectory
+    # fix_ultraSound_trajectory()
+
     # main function to clean data
-    # cleaning()
+    cleaning(1)
+    cleaning(2)
+    cleaning(3)
+    cleaning(4)
 
     df = pd.read_csv('clean_data/std_TOFEXP1.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP1.csv', index=False, header=False)
@@ -212,6 +306,8 @@ if __name__ == '__main__':
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP3.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP4.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
+
+
 
 
 

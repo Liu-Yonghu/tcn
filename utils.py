@@ -122,7 +122,7 @@ def load_dataset_ir(folder, feature=64):
     for key, fname in filenames.items():
         path = folder_path / fname
         if not path.exists():
-            raise FileNotFoundError(f"文件未找到: {path}")
+            raise FileNotFoundError(f"file not found: {path}")
         files[key] = path
 
 

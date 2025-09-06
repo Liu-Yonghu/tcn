@@ -1,7 +1,8 @@
-import keras.optimizers
 import os
+import json
 import utils
 import math
+from tcn_old import TCN
 from tcn_simple import TCN_model
 import pandas as pd
 import tcn_model
@@ -15,9 +16,11 @@ from utils import rmse
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError
-import matplotlib
-import tensorflow as tf
 from tensorflow.keras.preprocessing import timeseries_dataset_from_array
+import matplotlib
+import keras_tuner
+from keras import layers, models
+import tensorflow as tf
 
 matplotlib.use("TkAgg")
 def create_dataset_window(X_all, Y_all, window_size=20):
@@ -65,19 +68,18 @@ def create_tf_dataset(data_array, output_array, input_sequence_length=20, output
     return dataset
 
 def trajectory_curve(labels, GT_value, args=None):
-
     X_T = GT_value[:, :1]
     Y_T = GT_value[:, 1:]
     X_P = labels[:, :1]
     Y_P= labels[:, 1:]
-    # 创建图形
+    # create figure
     plt.figure(figsize=(6, 6))
     plt.plot(X_P, Y_P, marker='x', linestyle='-', color='blue', label='Prediction')
     plt.plot(X_T, Y_T, marker='o', linestyle='--', color='red', label='Ground True')
     plt.xlim(0, 3)
     plt.ylim(0, 3)
 
-    # 设置标题和标签
+    # set title and label
     plt.xlabel('X position (m)')
     plt.ylabel('Y position (m)')
     plt.title('Ground Truth vs Prediction Trajectory')
@@ -102,8 +104,6 @@ def trajectory_curve(labels, GT_value, args=None):
     filepath = os.path.join(save_path, filename)
     plt.savefig(filepath, dpi=600)
     plt.close()
-
-
 def loss_curve(history, args=None):
     plt.figure(figsize=(8, 5))
     plt.plot(history.history['loss'], label='Train Loss (MSE)')
@@ -138,11 +138,11 @@ def metrics_curve(history, args=None):
     val_mae = history.history['val_mae']
     plt.figure(figsize=(10, 6))
 
-    # RMSE 曲线
+    # RMSE curve
     plt.plot(rmse, 'b-', label='Training RMSE')
     plt.plot(val_rmse, 'r-', label='Validation RMSE')
 
-    # MAE 曲线
+    # MAE curve
     plt.plot(mae, 'b--', label='Training MAE')
     plt.plot(val_mae, 'r--', label='Validation MAE')
 
@@ -225,7 +225,6 @@ def slice_dataset(df, training_part, validing_part, running_data_dir, args=None)
         "lengths": segments,      # {'train': L, 'val': L, 'ignore': L}
     }
 
-
 def slice_dataset2(df, training_part, validing_part, running_data_dir, args=None):
     ''' try to slice dataset into n folds '''
     # slide the data into three part
@@ -281,6 +280,7 @@ def optimizer(args):
         X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
 
         # create model
+        model = 0
         if args.model == "simple":
             model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters,
                                         k_size=args.kernel_size, dense=args.dense)
@@ -331,187 +331,136 @@ def optimizer(args):
 
     print(f"\nResults saved to {result_path}")
 
-def optimizer2(args):
-    # create folders which used for results and temp files
-    for path in [args.output_dir, args.running_data_dir]:
-        os.makedirs(path, exist_ok=True)
+def build_model(hp, args):
+    if args.model == "simple":
+        model = tm.model_TCN_simple(
+            hidden=hp.Choice("hidden", [2, 3, 4]),
+            num_filters=hp.Choice("nb_filters", [8, 16, 32]),
+            k_size=hp.Choice("k_size", [2, 3, 4, 5]),
+            dense=hp.Choice("dense", [8, 16, 32])
+        )
+    elif args.model == "complete":
+        model = tm.model_TCN_complete(
+            hidden=hp.Choice("hidden", [2, 3, 4]),
+            num_filters=hp.Choice("nb_filters", [8, 16, 32]),
+            k_size=hp.Choice("k_size", [2, 3, 4, 5]),
+            dense=hp.Choice("dense", [8, 16, 32])
+        )
 
-    # loading the data and save basic info
+    model.compile(
+        optimizer=args.optimizer,
+        loss=args.loss,
+        metrics=args.metrics
+    )
+    return model
+def prepare_data(args):
     df = pd.read_csv(args.data_path, header=None)
     print("The whole dataset shape is:", df.shape)
 
-    val_losses = []
-
-    for fold in range(1, 7):
-        print(f"\n===== Training Fold {fold}/6 =====")
-        args.folds = fold
-
-        # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
-        res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
-        X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
-
-        # create model
-        if args.model == "simple":
-            model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters,
-                                        k_size=args.kernel_size, dense=args.dense)
-        elif args.model == "complete":
-            model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters,
-                                          k_size=args.kernel_size, dense=args.dense)
-        # compile
-        model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
-
-        # create windows
-        train = create_tf_dataset(X_train, Y_train, input_sequence_length=args.time_windows)
-        val = create_tf_dataset(X_val, Y_val, input_sequence_length=args.time_windows)
-
-        for X_train, Y_train in train:
-            history = model.fit(
-                X_train, Y_train,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                validation_data=(X_val, Y_val),
-                verbose=1
-            )
-
-
-
-
-        # train
-        history = model.fit(
-            X_train, Y_train,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            validation_data=(X_val, Y_val),
-            verbose=1
-        )
-        # draw trajectory and loss of result and save
-        model.summary()
-        # output = model(X_test)
-        # trajectory_curve(output, Y_test, args)
-        loss_curve(history, args)
-        metrics_curve(history, args)
-
-        # 保存该fold最小的val_loss
-        min_val_loss = min(history.history['val_loss'])
-        val_losses.append(min_val_loss)
-        print(f"Fold {fold} best val_loss = {min_val_loss:.4f}")
-
-        # ====== 计算平均和标准差 ======
-    val_losses = np.array(val_losses)
-    mean_loss = np.mean(val_losses)
-    std_loss = np.std(val_losses, ddof=1)
-
-    print("\n====== Cross Validation Results ======")
-    print("Validation Losses (6 folds):", val_losses)
-    print(f"Mean Validation Loss: {mean_loss:.4f}")
-    print(f"STD Validation Loss: {std_loss:.4f}")
-
-    exp = os.path.splitext(os.path.basename(args.data_path))[0]
-    result_path = os.path.join(args.output_dir, exp, "cross_val_results.txt")
-    with open(result_path, "w") as f:
-        f.write("====== Cross Validation Results ======\n")
-        f.write(f"Validation Losses (6 folds): {val_losses.tolist()}\n")
-        f.write(f"Mean Validation Loss: {mean_loss:.4f}\n")
-        f.write(f"STD Validation Loss: {std_loss:.4f}\n")
-
-    print(f"\nResults saved to {result_path}")
-
-    # test_scores = model.evaluate(X_test, Y_test, verbose=2)
-    # print("Test loss:", test_scores[0])
-    # print("Test mae:", test_scores[1])
-
-    # call the model to predict
-    output = model(X_test)
-    # print(output[:3, :])
-    # print("Output shape:", output.shape)
-
-    # draw trajectory and loss of result and save
-    model.summary()
-    trajectory_curve(output, Y_test, args)
-    loss_curve(history, args)
-    metrics_curve(history, args)
-
-def train_model(model, train_data, val_data, save_dir="results/exp1", epochs=100, patience=10, lr_patience=5, batch_size=32):
-
-    os.makedirs(save_dir, exist_ok=True)
-
-    # ---- 回调函数 ----
-    early_stop = EarlyStopping(monitor="val_loss", patience=patience, restore_best_weights=True, verbose=1)
-
-    checkpoint = ModelCheckpoint(filepath=os.path.join(save_dir, "best_model.h5"), monitor="val_loss", save_best_only=True,verbose=1)
-
-    reduce_lr = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=lr_patience, verbose=1)
-
-    # ---- 训练 ----
-    if isinstance(train_data, tuple):  # numpy array 输入
-        X_train, Y_train = train_data
-        if isinstance(val_data, tuple):  # numpy 验证集
-            validation_data = val_data
-        else:  # dataset 验证集
-            validation_data = val_data
-        history = model.fit(
-            X_train, Y_train,
-            validation_data=validation_data,
-            epochs=epochs,
-            batch_size=batch_size,
-            callbacks=[early_stop, checkpoint, reduce_lr],
-            verbose=1
-        )
-    else:  # tf.data.Dataset 输入
-        history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[early_stop, checkpoint, reduce_lr], verbose=1)
-
-        # ---- 绘制 Loss 曲线 ----
-    plt.figure(figsize=(6,4))
-    plt.plot(history.history["loss"], label="Train Loss")
-    plt.plot(history.history["val_loss"], label="Val Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.title("Training vs Validation Loss")
-    plt.savefig(os.path.join(save_dir, "loss_curve.png"))
-    plt.show()
-
-    return model, history
-
-
-def test(args):
-    df = pd.read_csv(args.data_path, header=None)
-    print("The whole dataset shape is:", df.shape)
-
-    # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
     res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
-    print(res["save_path"])
+    print("data partition saved in:", res["save_path"])
 
     X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
 
     X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
     X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+    X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
 
-    # 构建你的 TCN 模型
-    if args.model == "simple":
-        model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters,
-                                    k_size=args.kernel_size, dense=args.dense)
-    elif args.model == "complete":
-        model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters,
-                                      k_size=args.kernel_size, dense=args.dense)
+    return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
+# simple keras automate search, the more complex contrl of autokeras, reference NAS_2.py or NAS_3.py
+def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_size=32):
 
-    # model.compile(optimizer=Adam(learning_rate=1e-3, decay=1e-5),
-    #               loss=MeanSquaredError(),
-    #               metrics=["mae"])
-    model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
+    (X_train, Y_train), (X_val, Y_val), _ = prepare_data(args)
 
-    # 假设 train_dataset 和 val_dataset 已经是 tf.data.Dataset 或 numpy 数据
-    model, history = train_model(
-        model,
-        train_data=(X_train, Y_train),
-        val_data=(X_val, Y_val),
-        save_dir="results/tcn_exp3",
-        epochs=100,
-        patience=10,
-        lr_patience=5
+    exp = os.path.splitext(os.path.basename(args.data_path))[0]
+    save_path = f"results/tcn_search/{str(exp)}"
+
+    tuner = keras_tuner.RandomSearch(
+        hypermodel=lambda hp: build_model(hp, args),
+        objective="val_loss",
+        max_trials=max_trials,
+        seed=args.seed,
+        executions_per_trial=executions_per_trial,
+        directory="results",
+        project_name=save_path
     )
 
+    early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True, verbose=1)
+    checkpoint = ModelCheckpoint(filepath=f"{save_path}/best_model.h5", monitor="val_loss", save_weights_only=False, save_best_only=True, verbose=1)
+    reduce_lr = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)
 
+    tuner.search(
+        X_train, Y_train,
+        validation_data=(X_val, Y_val),
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=[early_stop, checkpoint, reduce_lr],
+        verbose=1
+    )
+
+    best_model = tuner.get_best_models(num_models=1)[0]
+    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+    print("Best hyperparameters found:", best_hps.values)
+    return best_model, best_hps, tuner, save_path
+def collect_tuner_results(tuner_dir, output_csv="tuner_results.csv"):
+    results = []
+
+    # read oracle.json，the score and index of trial
+    oracle_path = os.path.join(tuner_dir, "oracle.json")
+    if os.path.exists(oracle_path):
+        with open(oracle_path, "r") as f:
+            oracle = json.load(f)
+        trials = oracle.get("display").get("trial_number", {"None"})
+        print(trials)
+    else:
+        print("oracle.json not found, try to read in trial_x folder")
+        trials = {}
+
+    # search all trial_x folders
+    for trial_id in os.listdir(tuner_dir):
+        trial_dir = os.path.join(tuner_dir, trial_id)
+        trial_file = os.path.join(trial_dir, "trial.json")
+
+        if os.path.isdir(trial_dir) and os.path.exists(trial_file):
+            with open(trial_file, "r") as f:
+                trial_data = json.load(f)
+
+            trial_info = {
+                "trial_id": trial_id,
+                "score": trial_data.get("score", None),  # val_loss
+            }
+
+            # find hyperparmeter
+            hp = trial_data.get("hyperparameters", {}).get("values", {})
+            trial_info.update(hp)
+
+            results.append(trial_info)
+
+    # turn into DataFrame
+    df = pd.DataFrame(results)
+
+    if not df.empty:
+        # find the optimal trial（val_loss min）
+        best_idx = df["score"].astype(float).idxmin()
+        df["is_best"] = False
+        df.loc[best_idx, "is_best"] = True
+
+        best_trial = df.loc[best_idx].to_dict()
+        print("Optimal Trial:")
+        print(f"Trial ID: {best_trial['trial_id']}")
+        print(f"Score (val_loss): {best_trial['score']}")
+        print("The best parameter combination:")
+        for k, v in best_trial.items():
+            if k not in ["trial_id", "score", "is_best"]:
+                print(f"  {k}: {v}")
+    else:
+        df["is_best"] = []
+
+    output_path = os.path.join(tuner_dir, output_csv)
+    df.to_csv(output_path, index=False, encoding="utf-8")
+    print(f"The results saved on {output_path}")
+    return df
 
 if __name__ == '__main__':
 
@@ -519,7 +468,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # general
-    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--seed', type=int, default=777)
 
     # directory structure
     parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP3.csv')
@@ -534,10 +483,10 @@ if __name__ == '__main__':
 
     #model info
     parser.add_argument('--model', type=str, default='simple')
-    parser.add_argument('--hidden', type=int, default='2')
+    parser.add_argument('--hidden', type=int, default='4')
     parser.add_argument('--num_filters', type=int, default='16')
     parser.add_argument('--kernel_size', type=int, default='5')
-    parser.add_argument('--dense', type=int, default='16')
+    parser.add_argument('--dense', type=int, default='8')
     parser.add_argument('--epochs', type=int, default='20')
     parser.add_argument('--batch_size', type=int, default='16')
     parser.add_argument('--loss', type=str, default='mse')
@@ -546,9 +495,16 @@ if __name__ == '__main__':
     parser.add_argument('--dropout_rate', type=float, default='0.005')
 
     args = parser.parse_args()
-    optimizer(args)
 
-    #test(args)
+    ## optimizer is the normal training function, which has fixed parameter
+    # optimizer(args)
+
+    best_model, best_hps, tuner, results_path = run_search(args, max_trials=8, epochs=500)
+    collect_tuner_results(results_path)
+
+
+
+
 
 
 

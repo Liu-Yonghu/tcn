@@ -25,10 +25,11 @@ from keras_tuner.engine import tuner_utils
 from keras.preprocessing import timeseries_dataset_from_array
 from scipy import stats
 
+
 def load_dataset(path, file_training, file_valid, file_testing):
-    training_data = file_training
-    validation_data = file_valid
-    testing_data = file_testing
+    training_data = os.path.join(path, file_training)
+    validation_data = os.path.join(path, file_valid)
+    testing_data = os.path.join(path, file_testing)
     trainList = list()
     valList = list()
     testList = list()
@@ -78,30 +79,39 @@ def load_dataset(path, file_training, file_valid, file_testing):
 
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
-def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1, shuffle=False):
+
+def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1):
     inputs = timeseries_dataset_from_array(
-        data_array[:-2, :],
+        data_array,
         None,
         sequence_length=input_sequence_length,
         shuffle=False,
-        batch_size=batch_size,
+        batch_size=None,
     )
 
     target_offset = math.floor(input_sequence_length / 2) + 1
     target_seq_length = output_sequence_length
+
     targets = timeseries_dataset_from_array(
-        output_array[target_offset:-target_offset, :],
+        output_array[target_offset:, :],
         None,
         sequence_length=target_seq_length,
         shuffle=False,
-        batch_size=batch_size,
+        batch_size=None,
     )
 
+    input_len = len(list(inputs))
+    target_len = len(list(targets))
+    min_len = min(input_len, target_len)
+
+    inputs = inputs.take(min_len)
+    targets = targets.take(min_len)
+
     dataset = tf.data.Dataset.zip((inputs, targets))
-    if shuffle:
-        dataset = dataset.shuffle(100)
+    dataset = dataset.batch(batch_size, drop_remainder=True)
 
     return dataset
+
 
 def model_TCN(hidden, num_filters, k_size, dense):
     x = layers.Input(shape=(20, 64))
@@ -116,6 +126,7 @@ def model_TCN(hidden, num_filters, k_size, dense):
     model = models.Model(x, dense_out)
     # model.load_weights(path_tcn)
     return model
+
 
 class MyHyperModel(keras_tuner.HyperModel):
     def build(self, hp):
@@ -162,7 +173,7 @@ class MyHyperModel(keras_tuner.HyperModel):
                 # print(y.shape)
                 # print(student_predictions.shape)
                 # Compute losses
-                #student_loss = tf.reduce_mean(student_loss_fn(y, student_predictions))
+                # student_loss = tf.reduce_mean(student_loss_fn(y, student_predictions))
                 student_loss = student_loss_fn(y, student_predictions)
 
             # Compute gradients
@@ -181,7 +192,7 @@ class MyHyperModel(keras_tuner.HyperModel):
             # Compute predictions
             y_prediction_val = student_model(x, training=False)
             y_prediction_val = tf.squeeze(y_prediction_val)
-            #val_loss = tf.reduce_mean(student_loss_fn(y, y_prediction_val))
+            # val_loss = tf.reduce_mean(student_loss_fn(y, y_prediction_val))
             val_loss = student_loss_fn(y, y_prediction_val)
 
             # Update the metrics.
@@ -190,7 +201,7 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         # Assign the model to the callbacks.
         for callback in callbacks:
-            callback.model = model
+            callback.set_model(model)
             callback.on_train_begin(self)
         print("trial num:", trial.trial_id)
         print("exec num:", execution)
@@ -199,7 +210,7 @@ class MyHyperModel(keras_tuner.HyperModel):
             tot_s_loss = 0
             print("\nStart of epoch %d" % (epoch,))
             for step, (X_train, Y_train) in enumerate(train_ds):
-                #s_loss is the mean loss of every batch, deatail in "run_train_loss" function
+                # s_loss is the mean loss of every batch, deatail in "run_train_loss" function
                 s_loss = run_train_step(X_train, Y_train, model)
                 tot_s_loss = tot_s_loss + s_loss.numpy()
                 # print(s_loss)
@@ -255,43 +266,49 @@ class MyHyperModel(keras_tuner.HyperModel):
         plt.xlabel('Epochs', fontsize=16)
         plt.ylabel('Loss', fontsize=16)
         plt.legend()
-        plt.savefig(f"./autokeras_res/trial_{trial.trial_id}/learning_curve_tcn:{execution}.pdf")
+        plt.savefig(f"./autokeras_res/trial_{trial.trial_id}/learning_curve_tcn_exe{execution}.pdf")
         plt.close()
 
-
-        # same with train and validation set
-        test_x, test_y = zip(*test_ds)
-        test_x = np.array(test_x)
-        test_y = np.array(test_y)
-
+        # for plot evaluate figure
         all_train_x = []
         all_train_y = []
 
         all_val_x = []
         all_val_y = []
 
+        all_test_x = []
+        all_test_y = []
+
         for batch_x, batch_y in train_ds:
             all_train_x.append(batch_x.numpy())  # Convert to numpy array
             all_train_y.append(batch_y.numpy())  # Convert to numpy array
 
-        # Concatenare i batch per ottenere un array completo
         train_x = np.concatenate(all_train_x, axis=0)
         train_y = np.concatenate(all_train_y, axis=0)
+        train_y = np.squeeze(train_y, axis=1)
 
         for batch_x, batch_y in val_ds:
             all_val_x.append(batch_x.numpy())  # Convert to numpy array
             all_val_y.append(batch_y.numpy())  # Convert to numpy array
 
-        # Concatenare i batch per ottenere un array completo
         val_x = np.concatenate(all_val_x, axis=0)
         val_y = np.concatenate(all_val_y, axis=0)
+        val_y = np.squeeze(val_y, axis=1)
+
+        for batch_x, batch_y in test_ds:
+            all_test_x.append(batch_x.numpy())  # Convert to numpy array
+            all_test_y.append(batch_y.numpy())  # Convert to numpy array
+
+        test_x = np.concatenate(all_test_x, axis=0)
+        test_y = np.concatenate(all_test_y, axis=0)
+        test_y = np.squeeze(test_y, axis=1)
 
         try:
             model.load_weights("./autokeras_res/trial_" + str(trial.trial_id) + "/ckpt_exec" + str(
-                int(execution)) + ".h5")
+                int(execution)) + ".weights.h5")
             model.compile(optimizer='adam', loss='mse')
             # Evaluate the model
-            #best_test_loss = model.evaluate(test_x, test_y)
+            # best_test_loss = model.evaluate(test_x, test_y)
             best_test_loss = model.evaluate(test_x, test_y, return_dict=True)["loss"]
 
             print(f"Mean Squared Error on test data: {best_test_loss}")
@@ -344,7 +361,8 @@ class MyHyperModel(keras_tuner.HyperModel):
             plt.figure(figsize=(12, 6))
             # Plot delle letture del sensore (input) vs distanza reale
             plt.scatter(val_y[:, 0], val_y[:, 1], color='blue', label='Actual Distances', alpha=0.5)
-            plt.scatter(predictions_val[:, 0], predictions_val[:, 1], color='red', label='Predicted Distances', alpha=0.5)
+            plt.scatter(predictions_val[:, 0], predictions_val[:, 1], color='red', label='Predicted Distances',
+                        alpha=0.5)
             plt.xlabel('Distance y')
             plt.ylabel('Distance x')
             plt.xlim(0, 3)
@@ -367,6 +385,7 @@ class MyHyperModel(keras_tuner.HyperModel):
                 logs={"best_val_loss": best_val_loss, "best_test_loss": best_test_loss, "best_epoch": best_epoch})
 
         return best_test_loss
+
 
 # class  BayesianOptimization(keras_tuner.BayesianOptimization):
 class GridSearchTuner(keras_tuner.GridSearch):
@@ -456,8 +475,9 @@ class GridSearchTuner(keras_tuner.GridSearch):
         return os.path.join(
             # Each checkpoint is saved in its own directory.
             self.get_trial_dir(trial_id),
-            "ckpt_exec" + str(execution) + ".h5"
+            "ckpt_exec" + str(execution) + ".weights.h5"
         )
+
 
 class Logger(Callback):
     def on_train_begin(self, logs=None):
@@ -500,6 +520,7 @@ class Logger(Callback):
         tuner.oracle.trials[trial].rep_val_loss.append(np.min(val_score_holder))
         tuner.oracle.trials[trial].rep_train_loss.append(train_score_holder[np.argmin(val_score_holder)])
         tuner.oracle.trials[trial].rep_test_loss.append(logs['best_test_loss'])
+
 
 def printTable(path, tuner):
     print(tuner.oracle.max_trials)
@@ -561,7 +582,6 @@ def printTable(path, tuner):
     return best_test_loss_trial, best_test_loss_exec
 
 
-
 if __name__ == "__main__":
 
     # check GPU available
@@ -577,7 +597,7 @@ if __name__ == "__main__":
             # Memory growth must be set before GPUs have been initialized
             print(e)
     else:
-        print("NO gpu available")
+        print("No GPU Available")
 
     # basic info param settings
     batch_size = 32
@@ -587,19 +607,16 @@ if __name__ == "__main__":
     output_sequence_length = 1
 
     # Parent Directory path
-    parent_dir = "temp/TOF1/1"
+    parent_dir = "temp/std_TOFEXP1/1"
 
     # Path
     path = directory
-
     if not os.path.exists(path):
         os.mkdir(path)
         print("Directory '%s' created" % directory)
 
     # create dataset
-    X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "temp/TOF1/1/train.csv",
-                                                                  "temp/TOF1/1/val.csv",
-                                                                  "temp/TOF1/1/test.csv")
+    X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "train.csv","val.csv","test.csv")
     train_ds = create_tf_dataset(X_train, Y_train, input_sequence_length, output_sequence_length, batch_size)
     val_ds = create_tf_dataset(X_val, Y_val, input_sequence_length, output_sequence_length, batch_size)
     test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)

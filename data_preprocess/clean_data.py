@@ -6,9 +6,11 @@ def read_data(file_path, sensor):
     try:
         if sensor.lower() == 'radar':
             df = pd.read_csv(file_path, header=None, names=['angle', 'range', 'magnitude', 'timestamp'])
+            df.columns = df.columns.str.strip()
         else:
             df = pd.read_csv(file_path)
-        print(f'the size of this raw dataset: {df.shape}')
+            df.columns = df.columns.str.strip()
+        print(f'the shape of this raw dataset: {df.shape}')
         return df
     except Exception as e:
         print(f'Failed to load data: {e}')
@@ -22,6 +24,7 @@ def features_extract(df, sensor):
         distance_cols = [col for col in df.columns if col.startswith('distance')]
         signal_cols = [col for col in df.columns if col.startswith("signal_per_spad")]
         valid_cols = [col for col in df.columns if col.startswith(".is_valid_range")]
+        target_cols = [col for col in df.columns if col.startswith("target_status")]
         timestamp_cols = [col for col in df.columns if col.startswith(".HostTimestamp")]
 
         # features = df[distance_cols].values.astype(np.float32)
@@ -31,7 +34,7 @@ def features_extract(df, sensor):
         #
         # data = np.concatenate([timestamp, features, valid], axis=1)
 
-        data = pd.concat([df[timestamp_cols], df[distance_cols], df[valid_cols]], axis=1)
+        data = pd.concat([df[timestamp_cols], df[distance_cols], df[valid_cols],df[target_cols]],  axis=1)
 
     elif sensor.lower() == 'ultrasound':
 
@@ -69,18 +72,23 @@ def features_extract(df, sensor):
 def interpolation_data_by_samples(X):
     timestamp_col = X.columns[0]
     distance_cols = X.columns[1:65]
-    valid_cols = X.columns[65:]
+    valid_cols = X.columns[65:129]
+    target_cols = X.columns[129:]
+
 
     interpolated_rows = []
-    for idx, row in X.iterrows():
+    for _, row in X.iterrows():
         distances = row[distance_cols].astype(float)
-        valids = row[valid_cols].astype(bool)
 
-        # 构建 Series 并插值
-        valids.index = distances.index
-        interpolated = distances.mask(~valids).interpolate(method='linear', limit_direction='both')
+        isvalid_mask = row[valid_cols].astype(bool).to_numpy().ravel()          # (64,)
+        target_mask = row[target_cols].isin([4,5,6,9,10]).to_numpy().ravel()    # (64,)
 
-        # 合并结果
+        valids = np.logical_and(isvalid_mask, target_mask)
+
+        mask = pd.Series(valids, index=distances.index)
+
+        interpolated = distances.mask(~mask).interpolate(method='linear', limit_direction='both')
+
         new_row = pd.concat([
             pd.Series({timestamp_col: row[timestamp_col]}),
             interpolated,
@@ -93,16 +101,21 @@ def interpolation_data_by_samples(X):
 def interpolation_data_by_field(X):
     timestamp_col = X.columns[0]
     distance_cols = X.columns[1:65]
-    valid_cols = X.columns[65:]
+    valid_cols = X.columns[65:129]
+    target_cols = X.columns[129:]
 
     distance_interp = X[distance_cols].copy()
-    valid_mask = X[valid_cols].astype(bool)
+
+    isvalid_mask = X[valid_cols].to_numpy().astype(bool)           # (n,64)
+    target_mask = X[target_cols].isin([4, 5, 6, 9, 10]).to_numpy()     # (n,64)
+
+    mask = np.logical_and(isvalid_mask, target_mask)
 
     # interpolate on every column
-    for col in distance_cols:
-        valid_col = valid_cols[distance_cols.get_loc(col)]
-        mask = valid_mask[valid_col]
-        distance_interp[col] = X[col].mask(~mask).interpolate(method='linear', limit_direction='both')
+    for j, col in enumerate(distance_cols):
+        col_mask = mask[:, j]
+        s = X[col].mask(~col_mask).interpolate(method='linear', limit_direction='both')
+        distance_interp[col] = s
 
     result = pd.concat([X[timestamp_col], distance_interp], axis=1)
     return result
@@ -219,7 +232,7 @@ def cleaning(exp):
 
     labels = features_extract(df, sensor)
 
-    print(labels.shape)
+    print(f"The shape of label{labels.shape}")
 
     # to check the extracted labels
     labels.to_csv('./raw_data/labels.csv', index=False, header=True)
@@ -290,7 +303,7 @@ def fix_ultraSound_trajectory():
 if __name__ == '__main__':
 
     # Check ultrasound trajectory
-    # fix_ultraSound_trajectory()
+    fix_ultraSound_trajectory()
 
     # main function to clean data
     cleaning(1)
@@ -298,6 +311,7 @@ if __name__ == '__main__':
     cleaning(3)
     cleaning(4)
 
+    # read as experiment data
     df = pd.read_csv('clean_data/std_TOFEXP1.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP1.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP2.csv')
@@ -306,6 +320,7 @@ if __name__ == '__main__':
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP3.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP4.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
+
 
 
 

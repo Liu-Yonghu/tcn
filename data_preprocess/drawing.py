@@ -114,7 +114,6 @@ def compare_datasets(file1, file2, name1="Dataset A", name2="Dataset B", jump_th
     df1, dist1 = analyze_dataset(file1, name1, jump_thresh)
     df2, dist2 = analyze_dataset(file2, name2, jump_thresh)
 
-    # 绘制轨迹对比
     plt.figure(figsize=(10, 4))
     plt.subplot(1, 2, 1)
     plt.plot(df1["X"], df1["Y"], "b.", alpha=0.5, label=name1)
@@ -122,7 +121,6 @@ def compare_datasets(file1, file2, name1="Dataset A", name2="Dataset B", jump_th
     plt.legend()
     plt.title("Trajectory Distribution")
 
-    # 绘制位移直方图
     plt.subplot(1, 2, 2)
     plt.hist(dist1.dropna(), bins=50, alpha=0.5, label=name1)
     plt.hist(dist2.dropna(), bins=50, alpha=0.5, label=name2)

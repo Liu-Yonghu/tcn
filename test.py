@@ -56,9 +56,8 @@ if __name__ == '__main__':
     from tensorflow.keras.utils import timeseries_dataset_from_array
     import math
 
-    # 假设输入数据 10 步，每步 4 特征
     data_array = np.arange(400).reshape(100, 4)  # (10,4)
-    # 假设输出数据 10 步，每步 (a,b)
+
     output_array = np.arange(200).reshape(100, 2)  # (10,2)
     print(data_array)
 
@@ -73,6 +72,7 @@ if __name__ == '__main__':
     print("X.shape:", X.shape, "Y.shape:", Y.shape)
     for i in range(len(X)):
         print("X[{}]:".format(i), X[i][:, ], "Y:", Y[i])
+
 
 
 

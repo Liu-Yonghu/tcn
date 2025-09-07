@@ -608,6 +608,7 @@ if __name__ == "__main__":
 
     # Parent Directory path
     parent_dir = "temp/std_TOFEXP1/1"
+    results_folder = os.path.join("autokeras_res",parent_dir.split("temp/", 1)[1])
 
     # Path
     path = directory
@@ -628,7 +629,7 @@ if __name__ == "__main__":
         max_trials=80,
         executions_per_trial=10,
         directory=path,
-        project_name="autokeras_res",
+        project_name=results_folder,
         max_model_size=300000,
         overwrite=True)
 

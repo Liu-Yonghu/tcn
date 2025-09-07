@@ -87,6 +87,18 @@ python NAS_2.py or python NAS_3.py
   - Filters ∈ {8, 16, 32}  
   - Kernel size ∈ {2, 3, 4, 5}  
   - Dense units ∈ {8, 16, 32}
+- **simple keras parameter**
+  - Default keras tuner
+  - Optimization target = validation loss  
+  - Max trial = 80
+  - Execution = 10
+- **complete keras parameter**
+  - Input shape = (20, 64)
+  - GridSearchTuner
+  - Optimization target = minimize test loss
+  - Max trial = 80
+  - Execution = 10
+  - Max model size = 300000
 
 ## Functions description
 ```

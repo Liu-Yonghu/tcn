@@ -559,7 +559,7 @@ if __name__ == '__main__':
     ## optimizer is the normal training function, which has fixed parameter
     # optimizer(args)
 
-    best_model, best_hps, tuner, results_path = run_search(args, max_trials=1, executions_per_trial=2, epochs=10)
+    best_model, best_hps, tuner, results_path = run_search(args, max_trials=20, executions_per_trial=3, epochs=500)
     collect_tuner_results(results_path)
 
 

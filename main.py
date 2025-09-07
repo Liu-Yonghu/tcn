@@ -21,6 +21,8 @@ import matplotlib
 import keras_tuner
 from keras import layers, models
 import tensorflow as tf
+from keras.callbacks import TensorBoard,Callback
+import datetime
 
 matplotlib.use("TkAgg")
 def create_dataset_window(X_all, Y_all, window_size=20):
@@ -331,6 +333,9 @@ def optimizer(args):
 
     print(f"\nResults saved to {result_path}")
 
+
+#==========================================simple keras===============================================
+# simple keras automate search, the more complex contrl of autokeras, reference NAS_2.py or NAS_3.py
 def build_model(hp, args):
     if args.model == "simple":
         model = tm.model_TCN_simple(
@@ -367,7 +372,46 @@ def prepare_data(args):
     X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
 
     return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
-# simple keras automate search, the more complex contrl of autokeras, reference NAS_2.py or NAS_3.py
+class LossPlotter(Callback):
+    def __init__(self, save_dir, trial_id, execution_id):
+        super().__init__()
+        self.save_dir = save_dir
+        self.trial_id = trial_id
+        self.execution_id = execution_id
+        self.history = {"loss": [], "val_loss": []}
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        self.history["loss"].append(logs.get("loss"))
+        self.history["val_loss"].append(logs.get("val_loss"))
+
+        plt.figure()
+        plt.plot(self.history["loss"], label="Train Loss")
+        plt.plot(self.history["val_loss"], label="Val Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.legend()
+        plt.title(f"Trial {self.trial_id} - Exec {self.execution_id} Loss Curve")
+        os.makedirs(self.save_dir, exist_ok=True)
+        plt.savefig(f"{self.save_dir}/trial_{self.trial_id}/exec_{self.execution_id}_loss.png")
+        plt.close()
+class MyTuner(keras_tuner.RandomSearch):
+    def run_trial(self, trial, *args, **kwargs):
+        original_callbacks = kwargs.pop("callbacks", [])
+        histories = []
+        for execution in range(self.executions_per_trial):
+            callbacks = original_callbacks[:]
+            # every execution has one LossPlotter
+            loss_plotter = LossPlotter(
+                save_dir=self.project_dir,
+                trial_id=trial.trial_id,
+                execution_id=execution
+            )
+            callbacks.append(loss_plotter)
+            kwargs["callbacks"] = callbacks
+            history = super().run_trial(trial, *args, **kwargs)
+            histories.append(history)
+        return histories
 def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_size=32):
 
     (X_train, Y_train), (X_val, Y_val), _ = prepare_data(args)
@@ -375,37 +419,55 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
     exp = os.path.splitext(os.path.basename(args.data_path))[0]
     save_path = f"results/tcn_search/{str(exp)}"
 
-    tuner = keras_tuner.RandomSearch(
+    tuner = MyTuner(
         hypermodel=lambda hp: build_model(hp, args),
         objective="val_loss",
         max_trials=max_trials,
         seed=args.seed,
         executions_per_trial=executions_per_trial,
-        directory="results",
+        directory=".",
         project_name=save_path
     )
 
     early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True, verbose=1)
-    checkpoint = ModelCheckpoint(filepath=f"{save_path}/best_model.h5", monitor="val_loss", save_weights_only=False, save_best_only=True, verbose=1)
-    reduce_lr = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)
+    checkpoint = ModelCheckpoint(filepath=f"{save_path}/best_model.h5", monitor="val_loss", save_weights_only=True, save_best_only=True, verbose=1)
+    #reduce_lr = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)
+
+    # log_dir = os.path.join("logs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    # tensorboard_cb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
     tuner.search(
         X_train, Y_train,
         validation_data=(X_val, Y_val),
         epochs=epochs,
         batch_size=batch_size,
-        callbacks=[early_stop, checkpoint, reduce_lr],
+        callbacks=[early_stop, checkpoint],
         verbose=1
     )
 
     best_model = tuner.get_best_models(num_models=1)[0]
     best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    best_trial = tuner.oracle.get_best_trials(num_trials=1)[0]
+
+    best_val_loss = best_trial.score
+    best_trial_id = best_trial.trial_id
 
     print("Best hyperparameters found:", best_hps.values)
-    return best_model, best_hps, tuner, save_path
-def collect_tuner_results(tuner_dir, output_csv="tuner_results.csv"):
-    results = []
+    print(f"Best trial id: {best_trial_id}, best val_loss: {best_val_loss:.4f}")
 
+    results_file = os.path.join(save_path, "best_results.json")
+    with open(results_file, "w") as f:
+        json.dump({
+            "best_hyperparameters": best_hps.values,
+            "best_val_loss": best_val_loss,
+            "best_trial_id": best_trial_id,
+            "project": save_path
+        }, f, indent=4)
+
+    print(f"Best hyperparameters saved to {results_file}")
+    return best_model, best_hps, tuner, save_path
+def collect_tuner_results(tuner_dir):
+    results = []
     # read oracle.json，the score and index of trial
     oracle_path = os.path.join(tuner_dir, "oracle.json")
     if os.path.exists(oracle_path):
@@ -430,11 +492,9 @@ def collect_tuner_results(tuner_dir, output_csv="tuner_results.csv"):
                 "trial_id": trial_id,
                 "score": trial_data.get("score", None),  # val_loss
             }
-
             # find hyperparmeter
             hp = trial_data.get("hyperparameters", {}).get("values", {})
             trial_info.update(hp)
-
             results.append(trial_info)
 
     # turn into DataFrame
@@ -457,7 +517,7 @@ def collect_tuner_results(tuner_dir, output_csv="tuner_results.csv"):
     else:
         df["is_best"] = []
 
-    output_path = os.path.join(tuner_dir, output_csv)
+    output_path = os.path.join(tuner_dir, "tuner_results.csv")
     df.to_csv(output_path, index=False, encoding="utf-8")
     print(f"The results saved on {output_path}")
     return df
@@ -471,8 +531,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=777)
 
     # directory structure
-    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP3.csv')
-    parser.add_argument('--output_dir', type=str, default='results/segment/one')
+    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP1.csv')
+    parser.add_argument('--output_dir', type=str, default='results/normal_train/one')
     parser.add_argument('--running_data_dir', type=str, default='temp/')
     parser.add_argument('--folds', type=int, default='1')
 
@@ -488,7 +548,7 @@ if __name__ == '__main__':
     parser.add_argument('--kernel_size', type=int, default='5')
     parser.add_argument('--dense', type=int, default='8')
     parser.add_argument('--epochs', type=int, default='20')
-    parser.add_argument('--batch_size', type=int, default='16')
+    parser.add_argument('--batch_size', type=int, default='32')
     parser.add_argument('--loss', type=str, default='mse')
     parser.add_argument('--optimizer', type=str, default='adam')
     parser.add_argument('--metrics', nargs='+', type=str, default=[rmse, 'mae'])
@@ -499,7 +559,7 @@ if __name__ == '__main__':
     ## optimizer is the normal training function, which has fixed parameter
     # optimizer(args)
 
-    best_model, best_hps, tuner, results_path = run_search(args, max_trials=8, epochs=500)
+    best_model, best_hps, tuner, results_path = run_search(args, max_trials=1, executions_per_trial=2, epochs=10)
     collect_tuner_results(results_path)
 
 

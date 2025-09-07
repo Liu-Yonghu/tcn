@@ -1,8 +1,8 @@
-Datasets:
+data_preprocess:
 
-    dataset used for paper with splits
+    this module using to clean the data
 
-models.py:
+tcn_model.py:
 
     definition of:
         - TCN model simple (only dilation block)

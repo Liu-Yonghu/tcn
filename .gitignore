@@ -1,9 +1,11 @@
-results
-temp
+results/
+temp/
 data_preprocess/raw_data
 data_preprocess/clean_data
 .idea/
 autokeras_res
 __pycache__
+logs/
+
 
 

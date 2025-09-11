@@ -129,6 +129,9 @@ def model_TCN(hidden, num_filters, k_size, dense):
 
 
 class MyHyperModel(keras_tuner.HyperModel):
+    def __init__(self, results_folder=None):
+        super().__init__()
+        self.results_folder = results_folder
     def build(self, hp):
         # Supponiamo che mlp_model sia la tua MLP già allenata e tcn_model sia la TCN
         x = Input(shape=(20, 64))
@@ -162,6 +165,9 @@ class MyHyperModel(keras_tuner.HyperModel):
         train_acc = keras.metrics.MeanSquaredError()
         valid_acc = keras.metrics.MeanSquaredError()
         test_acc = keras.metrics.MeanSquaredError()
+
+        save_dir = os.path.join(self.results_folder, f"trial_{trial.trial_id}")
+        os.makedirs(save_dir, exist_ok=True)
 
         @tf.function(jit_compile=True)
         def run_train_step(x, y, student_model):
@@ -266,7 +272,7 @@ class MyHyperModel(keras_tuner.HyperModel):
         plt.xlabel('Epochs', fontsize=16)
         plt.ylabel('Loss', fontsize=16)
         plt.legend()
-        plt.savefig(f"./autokeras_res/trial_{trial.trial_id}/learning_curve_tcn_exe{execution}.pdf")
+        plt.savefig(os.path.join(save_dir, f"learning_curve_exe{execution}.pdf"))
         plt.close()
 
         # for plot evaluate figure
@@ -303,8 +309,9 @@ class MyHyperModel(keras_tuner.HyperModel):
         test_y = np.concatenate(all_test_y, axis=0)
         test_y = np.squeeze(test_y, axis=1)
 
+        best_test_loss = None
         try:
-            model.load_weights("./autokeras_res/trial_" + str(trial.trial_id) + "/ckpt_exec" + str(
+            model.load_weights(f"{save_dir}/trial_" + str(trial.trial_id) + "/ckpt_exec" + str(
                 int(execution)) + ".weights.h5")
             model.compile(optimizer='adam', loss='mse')
             # Evaluate the model
@@ -330,7 +337,7 @@ class MyHyperModel(keras_tuner.HyperModel):
             plt.legend()
 
             plt.tight_layout()
-            plt.savefig(f"./autokeras_res/trial_{trial.trial_id}/test_results_{execution}.pdf")
+            plt.savefig(os.path.join(save_dir, f"test_results_{execution}.pdf"))
             plt.close()
 
             # Use the model to make predictions on training data
@@ -352,7 +359,7 @@ class MyHyperModel(keras_tuner.HyperModel):
             plt.legend()
 
             plt.tight_layout()
-            plt.savefig(f'./autokeras_res/trial_{trial.trial_id}/train_results_{execution}.pdf')
+            plt.savefig(os.path.join(save_dir, f"train_results_{execution}.pdf"))
             plt.close()
 
             # Use the model to make predictions on validation data
@@ -372,7 +379,7 @@ class MyHyperModel(keras_tuner.HyperModel):
             plt.legend()
 
             plt.tight_layout()
-            plt.savefig(f'./autokeras_res/trial_{trial.trial_id}/val_results_{execution}.pdf')
+            plt.savefig(os.path.join(save_dir, f"val_results_{execution}.pdf"))
             plt.close()
 
 
@@ -608,7 +615,7 @@ if __name__ == "__main__":
 
     # Parent Directory path
     parent_dir = "temp/std_TOFEXP1/1"
-    results_folder = os.path.join("autokeras_res",parent_dir.split("temp/", 1)[1])
+    results_folder = os.path.join("autokeras_res", parent_dir.split("temp/", 1)[1])
 
     # Path
     path = directory
@@ -624,9 +631,9 @@ if __name__ == "__main__":
 
     # Tuner instatiation and search
     tuner = GridSearchTuner(
-        MyHyperModel(),
+        MyHyperModel(results_folder=results_folder),
         objective=keras_tuner.Objective("test_loss", "min"),
-        max_trials=80,
+        max_trials=20,
         executions_per_trial=10,
         directory=path,
         project_name=results_folder,

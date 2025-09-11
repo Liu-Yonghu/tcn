@@ -54,7 +54,7 @@ from scipy import stats
 
 
 def rmse(y_true, y_pred):
-    return K.sqrt(K.mean(K.square(y_pred - y_true)))
+    return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
 
 def load_dataset_cap(path,file_training,file_valid,file_testing):
     training_data =file_training

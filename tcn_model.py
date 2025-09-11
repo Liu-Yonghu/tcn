@@ -2,7 +2,7 @@ import tensorflow as tf
 import keras
 import numpy as np
 from ncps import wirings
-from ncps.tf import LTC, CfC
+#from ncps.tf import LTC, CfC
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.models import load_model, model_from_json
 from keras import layers, models

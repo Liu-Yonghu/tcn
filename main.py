@@ -24,7 +24,7 @@ import tensorflow as tf
 from keras.callbacks import TensorBoard,Callback
 import datetime
 
-matplotlib.use("TkAgg")
+#matplotlib.use("Agg")
 def create_dataset_window(X_all, Y_all, window_size=20):
     X_list = []
     Y_list = []
@@ -556,7 +556,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    ## optimizer is the normal training function, which has fixed parameter
+    # # optimizer is the normal training function, which has fixed parameter
     # optimizer(args)
 
     best_model, best_hps, tuner, results_path = run_search(args, max_trials=20, executions_per_trial=3, epochs=500)

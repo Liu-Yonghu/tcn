@@ -22,7 +22,7 @@ def animate_depth(frames, isHandled=False):
         return [im, frame_text]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), interval=200, blit=True, repeat=False)
-    plt.show()
+    plt.savefig()
     return ani
 
 def check_one_frame(frame, isHandled=False):
@@ -41,7 +41,7 @@ def check_one_frame(frame, isHandled=False):
 
     ax.set_title("Row-major reshape (default)")
     plt.colorbar(im, ax=ax)
-    plt.show()
+    plt.savefig()
 
 
 def normalize_ground_truth(coords, room_size=(3.0, 3.0)):
@@ -81,7 +81,7 @@ def animate_trajectory(coords, interval=50, save_path=None):
         ani.save(save_path, writer="ffmpeg" if save_path.endswith(".mp4") else "imagemagick")
         print(f"动画已保存到 {save_path}")
 
-    plt.show()
+    plt.savefig()
     return ani
 
 def analyze_dataset(file_path, name="dataset", jump_thresh=0.3):
@@ -128,7 +128,7 @@ def compare_datasets(file1, file2, name1="Dataset A", name2="Dataset B", jump_th
     plt.title("Step Distance Distribution")
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig()
 
 if __name__ == "__main__":
     # data = pd.read_csv('./clean_data/norm_tof1_.csv', usecols=range(1, 65)).to_numpy()

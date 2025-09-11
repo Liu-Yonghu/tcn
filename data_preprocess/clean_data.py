@@ -124,8 +124,15 @@ def save_data(data, labels, filename, method = "interpolated"):
     timestamp = data.iloc[:, 0]
     features = data.iloc[:, 1:]
 
-    data_norm = (features - features.min()) / (features.max() - features.min())
-    data_std = (features - features.mean()) / features.std()
+    global_min = features.values.min()
+    global_max = features.values.max()
+    global_mean = features.values.mean()
+    global_std = features.values.std()
+
+    data_norm = (features - global_min) / (global_max - global_min)
+    data_std = (features - global_mean) / global_std
+    print(f"featture's mean: {global_mean}")
+    print(f"featture's std: {global_std}")
 
     path = 'clean_data/'
     os.makedirs(path, exist_ok=True)

@@ -395,29 +395,60 @@ class LossPlotter(Callback):
         os.makedirs(self.save_dir, exist_ok=True)
         plt.savefig(f"{self.save_dir}/trial_{self.trial_id}/exec_{self.execution_id}_loss.png")
         plt.close()
+
+class TrialExecutionLogger(Callback):
+    def __init__(self, trial_id, execution_id, max_epochs):
+        super().__init__()
+        self.trial_id = trial_id
+        self.execution_id = execution_id
+        self.max_epochs = max_epochs
+
+    def on_train_begin(self, logs=None):
+        print(f"\n[Trial {self.trial_id} | Exec {self.execution_id}] "
+              f"Start training (max_epochs={self.max_epochs})")
+
+    def on_epoch_end(self, epoch, logs=None):
+        print(f"[Trial {self.trial_id} | Exec {self.execution_id}] "
+              f"Epoch {epoch+1}/{self.max_epochs}, "
+              f"loss={logs.get('loss'):.4f}, val_loss={logs.get('val_loss'):.4f}")
+
+    def on_train_end(self, logs=None):
+        print(f"[Trial {self.trial_id} | Exec {self.execution_id}] Training finished\n")
 class MyTuner(keras_tuner.RandomSearch):
     def run_trial(self, trial, *args, **kwargs):
         original_callbacks = kwargs.pop("callbacks", [])
         histories = []
         for execution in range(self.executions_per_trial):
+            print(f"\n=== Starting Trial {trial.trial_id}, Execution {execution} ===")
+
             callbacks = original_callbacks[:]
-            # every execution has one LossPlotter
+
             loss_plotter = LossPlotter(
                 save_dir=self.project_dir,
                 trial_id=trial.trial_id,
                 execution_id=execution
             )
             callbacks.append(loss_plotter)
+
+            callbacks.append(TrialExecutionLogger(
+                trial_id=trial.trial_id,
+                execution_id=execution,
+                max_epochs=kwargs.get("epochs", 0)
+            ))
+
             kwargs["callbacks"] = callbacks
             history = super().run_trial(trial, *args, **kwargs)
             histories.append(history)
+
+            print(f"=== Finished Trial {trial.trial_id}, Execution {execution} ===\n")
+
         return histories
 def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_size=32):
-
     (X_train, Y_train), (X_val, Y_val), _ = prepare_data(args)
 
     exp = os.path.splitext(os.path.basename(args.data_path))[0]
-    save_path = f"results/tcn_search/{str(exp)}"
+    save_path = os.path.join("results", "tcn_search", exp)
+    os.makedirs(save_path, exist_ok=True)
 
     tuner = MyTuner(
         hypermodel=lambda hp: build_model(hp, args),
@@ -425,16 +456,22 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
         max_trials=max_trials,
         seed=args.seed,
         executions_per_trial=executions_per_trial,
-        directory=".",
-        project_name=save_path
+        directory="results/tcn_search",
+        project_name=exp
     )
 
-    early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True, verbose=1)
-    checkpoint = ModelCheckpoint(filepath=f"{save_path}/best_model.h5", monitor="val_loss", save_weights_only=True, save_best_only=True, verbose=1)
-    #reduce_lr = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=1)
+    early_stop = EarlyStopping(
+        monitor="val_loss", patience=10,
+        restore_best_weights=True, verbose=1
+    )
 
-    # log_dir = os.path.join("logs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    # tensorboard_cb = TensorBoard(log_dir=log_dir, histogram_freq=1)
+    checkpoint = ModelCheckpoint(
+        filepath=os.path.join(save_path, "best_model.h5"),
+        monitor="val_loss", save_weights_only=True,
+        save_best_only=True, verbose=1
+    )
+
+    print(f"Starting hyperparameter search for experiment: {exp}")
 
     tuner.search(
         X_train, Y_train,
@@ -442,8 +479,9 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
         epochs=epochs,
         batch_size=batch_size,
         callbacks=[early_stop, checkpoint],
-        verbose=1
+        verbose=0  # 日志由 TrialExecutionLogger 打印
     )
+
 
     best_model = tuner.get_best_models(num_models=1)[0]
     best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -559,7 +597,7 @@ if __name__ == '__main__':
     # # optimizer is the normal training function, which has fixed parameter
     # optimizer(args)
 
-    best_model, best_hps, tuner, results_path = run_search(args, max_trials=20, executions_per_trial=3, epochs=500)
+    best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)
     collect_tuner_results(results_path)
 
 

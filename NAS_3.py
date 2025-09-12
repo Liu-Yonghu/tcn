@@ -311,8 +311,7 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         best_test_loss = None
         try:
-            model.load_weights(f"{save_dir}/trial_" + str(trial.trial_id) + "/ckpt_exec" + str(
-                int(execution)) + ".weights.h5")
+            model.load_weights(os.path.join(save_dir, f"ckpt_exec{execution}.weights.h5"))
             model.compile(optimizer='adam', loss='mse')
             # Evaluate the model
             # best_test_loss = model.evaluate(test_x, test_y)
@@ -391,7 +390,11 @@ class MyHyperModel(keras_tuner.HyperModel):
             callback.on_train_end(
                 logs={"best_val_loss": best_val_loss, "best_test_loss": best_test_loss, "best_epoch": best_epoch})
 
-        return best_test_loss
+        return {
+            "test_loss": best_test_loss,
+            "val_loss": best_val_loss,
+            "train_loss": loss_values[best_epoch]
+        }
 
 
 # class  BayesianOptimization(keras_tuner.BayesianOptimization):

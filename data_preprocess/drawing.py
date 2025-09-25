@@ -1,31 +1,37 @@
+import os
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib
-
-matplotlib.use("TkAgg")
-def animate_depth(frames, isHandled=False):
+from clean_data import read_data, features_extract, interpolation_data_by_field
+matplotlib.use('TkAgg')
+def animate_depth(frames, save_path, isHandled=None):
     fig, ax = plt.subplots()
-    if isHandled:
+    if isHandled == "minMax":
+        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=0, vmax=1)
+    elif isHandled == "zScore":
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=-3, vmax=3)
     else:
-        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=0, vmax=3)
+        min = np.min(frames)
+        max = np.max(frames)
+        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=min, vmax=max)
 
     plt.colorbar(im, ax=ax, label="Depth (m)")
     frame_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
                          verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-
     def update(frame_index):
         im.set_array(frames[frame_index])
         frame_text.set_text(f'Frame: {frame_index + 1}')
         return [im, frame_text]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), interval=200, blit=True, repeat=False)
-    plt.savefig()
+    ani.save(save_path, writer="ffmpeg", fps=5)
+    #plt.show()
+    plt.close()
     return ani
 
-def check_one_frame(frame, isHandled=False):
+def check_one_frame(frame, save_path, isHandled=False):
     # the first frame
     print(frame)
     print("----------------------------------------------------")
@@ -41,8 +47,8 @@ def check_one_frame(frame, isHandled=False):
 
     ax.set_title("Row-major reshape (default)")
     plt.colorbar(im, ax=ax)
-    plt.savefig()
-
+    plt.savefig(save_path, format='jpg')
+    plt.close()
 
 def normalize_ground_truth(coords, room_size=(3.0, 3.0)):
     return coords / np.array(room_size)
@@ -130,36 +136,115 @@ def compare_datasets(file1, file2, name1="Dataset A", name2="Dataset B", jump_th
     plt.tight_layout()
     plt.savefig()
 
+def animate_depth_with_mask(frames, masks, save_path, isHandled=None):
+    fig, ax = plt.subplots()
+    if isHandled == "minMax":
+        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=0, vmax=1)
+    elif isHandled == "zScore":
+        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=-3, vmax=3)
+    else:
+        min = np.min(frames)
+        max = np.max(frames)
+        im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=min, vmax=max)
+
+    plt.colorbar(im, ax=ax, label="Depth (m)")
+    frame_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
+                         verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
+
+    # 初始 mask
+    mask_rgba = np.zeros((*frames[0].shape, 4))   # RGBA
+    mask_rgba[..., 3] = masks[0] * 1.0          # alpha 通道 = 1 表示不透明
+    mask_im = ax.imshow(mask_rgba, animated=True, zorder=10)
+
+    def update(frame_index):
+        im.set_array(frames[frame_index])
+
+        mask_rgba = np.zeros((*frames[frame_index].shape, 4))
+        mask_rgba[..., 3] = masks[frame_index] * 1.0  # alpha=1 → 黑色
+        mask_im.set_array(mask_rgba)
+
+        frame_text.set_text(f'Frame: {frame_index + 1}')
+        return [im, mask_im, frame_text]
+
+    ani = animation.FuncAnimation(fig, update, frames=len(frames),
+                                  interval=200, blit=True, repeat=False)
+
+    ani.save(save_path, writer="ffmpeg", fps=5)
+    #plt.show()
+    plt.close()
+    return ani
+
+def generate_animate_depth_mask(exp):
+    # default
+    os.makedirs("./animation/", exist_ok=True)
+    file_path = ""
+    sensor = ""
+
+    if exp == 1:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+        sensor = "ToF"
+    elif exp == 2:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_122238.csv"
+        sensor = "ToF"
+    elif exp == 3:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_145832.csv"
+        sensor = "ToF"
+    elif exp == 4:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_164900.csv"
+        sensor = "ToF"
+
+    df = read_data(file_path, sensor)
+    raw_features = features_extract(df, sensor)
+    print(raw_features.shape)
+
+    # to check the extracted features
+    raw_features.to_csv('./raw_data/raw.csv', index=False, header=True)
+
+    _, mask = interpolation_data_by_field(raw_features)
+
+    data = pd.read_csv('./clean_data/std_TOFEXP4.csv', usecols=range(1, 65)).to_numpy()
+    frames = data.reshape(-1, 8, 8)
+    mask = mask.reshape(-1, 8, 8)
+    #mask = np.ones((14777, 8, 8), dtype=int)
+    isHandled = "zScore"
+    animate_depth_with_mask(frames, ~mask, f"./animation/std_TOFEXP{exp}_with_mask.mp4", isHandled)
+
+
 if __name__ == "__main__":
-    # data = pd.read_csv('./clean_data/norm_tof1_.csv', usecols=range(1, 65)).to_numpy()
+    os.makedirs("./animation/", exist_ok=True)
+    generate_animate_depth_mask(4)
+
+    # data = pd.read_csv('./clean_data/std_TOFEXP4.csv', usecols=range(1, 65)).to_numpy()
     # frames = data.reshape(-1, 8, 8)
     # print(data.shape)
 
     # data = pd.read_csv('./raw_data/features.csv', usecols=range(1, 65)).to_numpy()
     # frames = (data/1000).reshape(-1, 8, 8)
 
-    # data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
-    # frames = (data/1000).reshape(-1, 8, 8)
+    #data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
+    #frames = (data/1000).reshape(-1, 8, 8)
 
-    data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
-    frames = (data).reshape(-1, 8, 8)
-    isHandled = True
+    # data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
+    # frames = (data).reshape(-1, 8, 8)
+    #isHandled = "zScore" #"minMax"
 
-    check_one_frame(data[0], isHandled)
-    animate_depth(frames, isHandled)
+    #check_one_frame(data[0], "./animation/std_TOFEXP4.jpg", isHandled)
+    #animate_depth(frames, "./animation/std_TOFEXP4.mp4", isHandled)
 
-    labels = pd.read_csv('../exp_data/std_TOFEXP4.csv', usecols=range(64, 66)).to_numpy()
-    print(labels.shape)
-    recordmin = []
-    recordmax = []
-    for idx, row in enumerate(labels):
-        if (row[0]< 0) or (row[1] < 0):
-            recordmin.append((idx, row))
-        if (row[0] > 3) or (row[1] > 3):
-            recordmax.append((idx, row))
 
-    print(recordmin)
-    print(recordmax)
-    animate_trajectory(labels, interval=30)
+    # labels = pd.read_csv('../exp_data/std_TOFEXP4.csv', usecols=range(64, 66)).to_numpy()
+    # print(labels.shape)
+    # recordmin = []
+    # recordmax = []
+    # for idx, row in enumerate(labels):
+    #     if (row[0]< 0) or (row[1] < 0):
+    #         recordmin.append((idx, row))
+    #     if (row[0] > 3) or (row[1] > 3):
+    #         recordmax.append((idx, row))
+    #
+    # print(recordmin)
+    # print(recordmax)
+    # animate_trajectory(labels, interval=30,)
 
-    compare_datasets("./raw_data/exp3_1h_ultrasound.csv", "./raw_data/exp4_1h_ultrasound.csv", jump_thresh=0.3)
+    #compare_datasets("./raw_data/exp3_1h_ultrasound.csv", "./raw_data/exp4_1h_ultrasound.csv", jump_thresh=0.3)
+

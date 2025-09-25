@@ -550,7 +550,7 @@ def printTable(path, tuner):
     var_res = np.zeros(tuner.oracle.max_trials)
     exec_best = np.zeros(tuner.oracle.max_trials)
 
-    title = path + '/autokeras_res/NAS_results.csv'
+    title = path + '/autokeras_res/NAS_results_TOFEXP3.csv'
     results = open(title, "w+")
 
     # Header

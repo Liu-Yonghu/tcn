@@ -48,9 +48,16 @@ def create_dataset_window(X_all, Y_all, window_size=5):
     return X, Y
 
 
+    # ** ** ** ** ** ** ** ** ** ** ** ** ** **
+    # User: yonghu
+    # Password: cacNuphUb4
+    # ** ** ** ** ** ** ** ** ** ** ** ** ** **
+
 if __name__ == '__main__':
     print(keras.__version__)
     print(tf.__version__)
+
+
     import numpy as np
     import tensorflow as tf
     from tensorflow.keras.utils import timeseries_dataset_from_array

@@ -1,6 +1,9 @@
 import os
+import sys
+import math
 import pandas as pd
 import numpy as np
+from collections import Counter, defaultdict
 def read_data(file_path, sensor):
     # read CSV file
     try:
@@ -14,8 +17,6 @@ def read_data(file_path, sensor):
         return df
     except Exception as e:
         print(f'Failed to load data: {e}')
-
-
 def features_extract(df, sensor):
     #extract the the useful fields which we want
     data = []
@@ -68,13 +69,11 @@ def features_extract(df, sensor):
     else:
         print(" no this kind of sensor ")
     return data
-
 def interpolation_data_by_samples(X):
     timestamp_col = X.columns[0]
     distance_cols = X.columns[1:65]
     valid_cols = X.columns[65:129]
     target_cols = X.columns[129:]
-
 
     interpolated_rows = []
     for _, row in X.iterrows():
@@ -97,7 +96,6 @@ def interpolation_data_by_samples(X):
 
     result = pd.DataFrame(interpolated_rows)
     return result
-
 def interpolation_data_by_field(X):
     timestamp_col = X.columns[0]
     distance_cols = X.columns[1:65]
@@ -108,18 +106,14 @@ def interpolation_data_by_field(X):
 
     isvalid_mask = X[valid_cols].to_numpy().astype(bool)           # (n,64)
     target_mask = X[target_cols].isin([4, 5, 6, 9, 10]).to_numpy()     # (n,64)
-
     mask = np.logical_and(isvalid_mask, target_mask)
-
     # interpolate on every column
     for j, col in enumerate(distance_cols):
         col_mask = mask[:, j]
         s = X[col].mask(~col_mask).interpolate(method='linear', limit_direction='both')
         distance_interp[col] = s
-
     result = pd.concat([X[timestamp_col], distance_interp], axis=1)
-    return result
-
+    return result, mask
 def save_data(data, labels, filename, method = "interpolated"):
     timestamp = data.iloc[:, 0]
     features = data.iloc[:, 1:]
@@ -131,8 +125,8 @@ def save_data(data, labels, filename, method = "interpolated"):
 
     data_norm = (features - global_min) / (global_max - global_min)
     data_std = (features - global_mean) / global_std
-    print(f"featture's mean: {global_mean}")
-    print(f"featture's std: {global_std}")
+    print(f"feature's mean: {global_mean}")
+    print(f"feature's std: {global_std}")
 
     path = 'clean_data/'
     os.makedirs(path, exist_ok=True)
@@ -169,7 +163,7 @@ def save_data(data, labels, filename, method = "interpolated"):
     data_norm.to_csv(os.path.join(path, f'norm_{filename}.csv'), index=False, header=True)
     data_std.to_csv(os.path.join(path, f'std_{filename}.csv'), index=False, header=True)
     print(f"Saved norm_{filename} and std_{filename} to {path}")
-
+    return pd.DataFrame(data_std), pd.DataFrame(data_norm)
 def mean_labels(labels, target_len):
     n = len(labels)
     step = n / target_len
@@ -184,67 +178,6 @@ def mean_labels(labels, target_len):
 
     print(len(averaged_labels), target_len)
     return pd.DataFrame(averaged_labels).reset_index(drop=True)
-
-def cleaning(exp):
-    # default
-    file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
-    sensor = "ToF"
-    if exp == 1:
-        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
-        sensor = "ToF"
-    elif exp == 2:
-        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_122238.csv"
-        sensor = "ToF"
-    elif exp == 3:
-        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_145832.csv"
-        sensor = "ToF"
-    elif exp == 4:
-        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_164900.csv"
-        sensor = "ToF"
-
-    df = read_data(file_path, sensor)
-    raw_features = features_extract(df, sensor)
-    print(raw_features.shape)
-
-    # to check the extracted features
-    raw_features.to_csv('./raw_data/raw.csv', index=False, header=True)
-
-    result = interpolation_data_by_field(raw_features)
-    result.to_csv('./raw_data/features.csv', index=False, header=True)
-    print(result.shape)
-
-    #read ultrasound data as label
-    file_path = "./raw_data/exp1_10min_ultrasound.csv"
-    sensor = "ultrasound"
-    filename = "TOFEXP1"
-
-    if exp == 1:
-        file_path = "./raw_data/exp1_10min_ultrasound.csv"
-        sensor = "ultrasound"
-        filename = "TOFEXP1"
-    elif exp == 2:
-        file_path = "./raw_data/exp2_30min_ultrasound.csv"
-        sensor = "ultrasound"
-        filename = "TOFEXP2"
-    elif exp == 3:
-        file_path = "./raw_data/exp3_1h_ultrasound.csv"
-        sensor = "ultrasound"
-        filename = "TOFEXP3"
-    elif exp == 4:
-        file_path = "./raw_data/exp4_1h_ultrasound.csv"
-        sensor = "ultrasound"
-        filename = "TOFEXP4"
-
-    df = read_data(file_path, sensor)
-
-    labels = features_extract(df, sensor)
-
-    print(f"The shape of label{labels.shape}")
-
-    # to check the extracted labels
-    labels.to_csv('./raw_data/labels.csv', index=False, header=True)
-    save_data(result, labels, filename, "mean")
-
 def clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3, stuck_thresh=1e-3, stuck_len=16):
     df = df.copy()
     N = len(df)
@@ -287,7 +220,6 @@ def clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3, stuc
     df["X"] = df["X"].interpolate(method="linear", limit_direction="both")
     df["Y"] = df["Y"].interpolate(method="linear", limit_direction="both")
     return df
-
 def fix_ultraSound_trajectory():
     df = read_data("./raw_data/exp1_10min_ultrasound.csv", "ultrasound")
     df1 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
@@ -304,13 +236,186 @@ def fix_ultraSound_trajectory():
     df = read_data("./raw_data/exp4_1h_ultrasound.csv", "ultrasound")
     df4 = clean_trajectory_general(df, range_min=0, range_max=3, jump_thresh=0.3)
     df4.to_csv("./raw_data/exp4_1h_ultrasound.csv", index=False)
+def analysis(exp, data, std_data, norm_data):
+    data_collection = {}
+    data_collection["raw"] = {}
+    data_collection["clean"] = {}
+    data_collection["std"] = {}
+    data_collection["norm"] = {}
+    timestamp_col = data.columns[0]
+    distance_cols = data.columns[1:65]
+    valid_cols = data.columns[65:129]
+    target_cols = data.columns[129:]
 
+    isvalid_mask = data[valid_cols].to_numpy().astype(bool)  # (n,64)
+    target_mask = data[target_cols].isin([4, 5, 6, 9, 10]).to_numpy()  # (n,64)
+    mask = np.logical_and(isvalid_mask, target_mask)
 
+    D = data[distance_cols]
+    data_collection["raw"]["mask"] = np.sum(mask)
+    data_collection["raw"]["invalid_number"] = np.sum(~mask)
+    data_collection["raw"]["total_number"] = D.size
+    data_collection["raw"]["valid_ratio"] = float(np.sum(mask) / D.size)
+    data_collection["raw"]["G_min"] = D.values.min()
+    data_collection["raw"]["G_max"] = D.values.max()
+    data_collection["raw"]["G_mean"] = D.values.mean()
+    data_collection["raw"]["G_std"] = D.values.std()
+
+    col_std = D.std(axis=0, skipna=True).to_numpy()
+    data_collection["raw"]["avg_col_std"] = float(np.mean(col_std))
+    data_collection["raw"]["zero_var_cols"] = int(np.sum(col_std < 1e-12))
+
+    spatial_std = D.std(axis=1, skipna=True).to_numpy()
+    data_collection["raw"]["mean_spatial_std"] = float(np.mean(spatial_std))
+    data_collection["raw"]["median_spatial_std"] = float(np.median(spatial_std))
+
+    results = interpolation_data_by_field(data)
+    print(results)
+
+    features = results.iloc[:, 1:]
+
+    data_collection["clean"]["mask"] = np.nan
+    data_collection["clean"]["invalid_number"] = np.nan
+    data_collection["clean"]["total_number"] = np.nan
+    data_collection["clean"]["valid_ratio"] = np.nan
+    data_collection["clean"]["G_min"] = features.values.min()
+    data_collection["clean"]["G_max"] = features.values.max()
+    data_collection["clean"]["G_mean"] = features.values.mean()
+    data_collection["clean"]["G_std"] = features.values.std()
+
+    col_std = features.std(axis=0, skipna=True).to_numpy()
+    data_collection["clean"]["avg_col_std"] = float(np.mean(col_std))
+    data_collection["clean"]["zero_var_cols"] = int(np.sum(col_std < 1e-12))
+
+    spatial_std = features.std(axis=1, skipna=True).to_numpy()
+    data_collection["clean"]["mean_spatial_std"] = float(np.mean(spatial_std))
+    data_collection["clean"]["median_spatial_std"] = float(np.median(spatial_std))
+
+    # z-socore normal
+    features = std_data.iloc[:, 1:65]
+
+    data_collection["std"]["mask"] = np.nan
+    data_collection["std"]["invalid_number"] = np.nan
+    data_collection["std"]["total_number"] = np.nan
+    data_collection["std"]["valid_ratio"] = np.nan
+    data_collection["std"]["G_min"] = features.values.min()
+    data_collection["std"]["G_max"] = features.values.max()
+    data_collection["std"]["G_mean"] = features.values.mean()
+    data_collection["std"]["G_std"] = features.values.std()
+
+    col_std = features.std(axis=0, skipna=True).to_numpy()
+    data_collection["std"]["avg_col_std"] = float(np.mean(col_std))
+    data_collection["std"]["zero_var_cols"] = int(np.sum(col_std < 1e-12))
+
+    spatial_std = features.std(axis=1, skipna=True).to_numpy()
+    data_collection["std"]["mean_spatial_std"] = float(np.mean(spatial_std))
+    data_collection["std"]["median_spatial_std"] = float(np.median(spatial_std))
+
+    #minmax normal
+    features = norm_data.iloc[:, 1:65]
+
+    data_collection["norm"]["mask"] = np.nan
+    data_collection["norm"]["invalid_number"] = np.nan
+    data_collection["norm"]["total_number"] = np.nan
+    data_collection["norm"]["valid_ratio"] = np.nan
+    data_collection["norm"]["G_min"] = features.values.min()
+    data_collection["norm"]["G_max"] = features.values.max()
+    data_collection["norm"]["G_mean"] = features.values.mean()
+    data_collection["norm"]["G_std"] = features.values.std()
+
+    col_std = features.std(axis=0, skipna=True).to_numpy()
+    data_collection["norm"]["avg_col_std"] = float(np.mean(col_std))
+    data_collection["norm"]["zero_var_cols"] = int(np.sum(col_std < 1e-12))
+
+    spatial_std = features.std(axis=1, skipna=True).to_numpy()
+    data_collection["norm"]["mean_spatial_std"] = float(np.mean(spatial_std))
+    data_collection["norm"]["median_spatial_std"] = float(np.median(spatial_std))
+
+    out_path = os.path.join("clean_data", "analysis.csv")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    need_header = (not os.path.exists(out_path)) or (os.path.getsize(out_path) == 0)
+    with open(out_path, "a+", encoding="utf-8") as results:
+        if need_header:
+            results.write(
+                '"type","exp","mask","invalid_number","total_number","valid_ratio",'
+                '"Global_min","Global_max","G_mean","Global_std",'
+                '"avg_col_std","zero_var_cols","mean_spatial_std","median_spatial_std"\n'
+            )
+        for section, m in data_collection.items():
+            line = (
+                f'{section},{exp},{m.get("mask")},{m.get("invalid_number")},'
+                f'{m.get("total_number")},{m.get("valid_ratio"):.5f},'
+                f'{m.get("G_min"):.5f},{m.get("G_max"):.5f},{m.get("G_mean"):.5f},{m.get("G_std"):.5f},'
+                f'{m.get("avg_col_std"):.5f},{m.get("zero_var_cols"):.5f},{m.get("mean_spatial_std"):.5f},{m.get("median_spatial_std"):.5f}\n'
+            )
+            results.write(line)
+
+def cleaning(exp):
+    # default
+    file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+    sensor = "ToF"
+    if exp == 1:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
+        sensor = "ToF"
+    elif exp == 2:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_122238.csv"
+        sensor = "ToF"
+    elif exp == 3:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_145832.csv"
+        sensor = "ToF"
+    elif exp == 4:
+        file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_164900.csv"
+        sensor = "ToF"
+
+    df = read_data(file_path, sensor)
+    raw_features = features_extract(df, sensor)
+    print(raw_features.shape)
+
+    # to check the extracted features
+    raw_features.to_csv('./raw_data/raw.csv', index=False, header=True)
+
+    result,_ = interpolation_data_by_field(raw_features)
+    result.to_csv('./raw_data/features.csv', index=False, header=True)
+    print(result.shape)
+
+    #read ultrasound data as label
+    file_path = "./raw_data/exp1_10min_ultrasound.csv"
+    sensor = "ultrasound"
+    filename = "TOFEXP1"
+
+    if exp == 1:
+        file_path = "./raw_data/exp1_10min_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP1"
+    elif exp == 2:
+        file_path = "./raw_data/exp2_30min_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP2"
+    elif exp == 3:
+        file_path = "./raw_data/exp3_1h_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP3"
+    elif exp == 4:
+        file_path = "./raw_data/exp4_1h_ultrasound.csv"
+        sensor = "ultrasound"
+        filename = "TOFEXP4"
+
+    df = read_data(file_path, sensor)
+
+    labels = features_extract(df, sensor)
+
+    print(f"The shape of label{labels.shape}")
+
+    # to check the extracted labels
+    labels.to_csv('./raw_data/labels.csv', index=False, header=True)
+    std_features, norm_features = save_data(result, labels, filename, "mean")
+
+    analysis(exp, raw_features, std_features, norm_features)
 
 if __name__ == '__main__':
 
     # Check ultrasound trajectory
-    fix_ultraSound_trajectory()
+    #fix_ultraSound_trajectory()
 
     # main function to clean data
     cleaning(1)
@@ -327,6 +432,12 @@ if __name__ == '__main__':
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP3.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP4.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
+
+
+    # cleaning(4)
+    # df = pd.read_csv('clean_data/std_TOFEXP4.csv')
+    # data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
+
 
 
 

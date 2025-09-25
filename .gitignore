@@ -2,10 +2,13 @@ results/
 temp/
 data_preprocess/raw_data
 data_preprocess/clean_data
+data_preprocess/animation
+data_preprocess/compare_report
 .idea/
 autokeras_res
 __pycache__
 logs/
+downloads/
 
 
 

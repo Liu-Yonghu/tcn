@@ -396,9 +396,8 @@ class MyHyperModel(keras_tuner.HyperModel):
             "train_loss": loss_values[best_epoch]
         }
 
-
-# class  BayesianOptimization(keras_tuner.BayesianOptimization):
-class GridSearchTuner(keras_tuner.GridSearch):
+#class GridSearchTuner(keras_tuner.GridSearch):
+class BayesianOptimization(keras_tuner.BayesianOptimization):
     def __init__(self, hypermodel, **kwargs):
         super().__init__(hypermodel, **kwargs)
 
@@ -538,14 +537,16 @@ def printTable(path, tuner):
     mean_res = np.zeros(tuner.oracle.max_trials)
     var_res = np.zeros(tuner.oracle.max_trials)
     exec_best = np.zeros(tuner.oracle.max_trials)
+    ##
+    min_val = np.zeros(tuner.oracle.max_trials)
 
-    title = path + '/autokeras_res/NAS_results.csv'
+    title = os.path.join(path, results_folder, "NAS_results.csv")
     results = open(title, "w+")
 
     # Header
-
     results.write('"Trial_id",')
     results.write('"Best exec",')
+    results.write('"Min val MSE",')
     results.write('"Min test MSE",')
     results.write('"Mean test MSE",')
     results.write('"Variance test MSE",')
@@ -563,6 +564,7 @@ def printTable(path, tuner):
             trial_id = "{:01d}".format(n)
         # print("trial_id:",trial_id)
         # print(tuner.oracle.trials['0'])
+        min_val[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_val_loss)))[1][0]
         min_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[1][0]
         mean_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[2]
         var_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[3]
@@ -574,6 +576,7 @@ def printTable(path, tuner):
 
         results.write('%d,' % n)
         results.write('%d,' % exec_best[n])
+        results.write('%.5f,' % min_val[n])
         results.write('%.5f,' % min_res[n])
         results.write('%.5f,' % mean_res[n])
         results.write('%.5f,' % var_res[n])
@@ -617,8 +620,10 @@ if __name__ == "__main__":
     output_sequence_length = 1
 
     # Parent Directory path
-    parent_dir = "temp/std_TOFEXP1/1"
-    results_folder = os.path.join("autokeras_res", parent_dir.split("temp/", 1)[1])
+    parent_dir = "temp/std_TOFEXP1/2"
+    exp = parent_dir.split("temp/", 1)[1]
+
+    results_folder = os.path.join("autokeras_res", exp)
 
     # Path
     path = directory
@@ -633,7 +638,7 @@ if __name__ == "__main__":
     test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)
 
     # Tuner instatiation and search
-    tuner = GridSearchTuner(
+    tuner = BayesianOptimization(
         MyHyperModel(results_folder=results_folder),
         objective=keras_tuner.Objective("test_loss", "min"),
         max_trials=20,
@@ -655,10 +660,11 @@ if __name__ == "__main__":
     else:
         trial_id = "{:01d}".format(trial_id_tmp)
 
-    title = path + '/bestNAS_results.csv'
+    title = os.path.join(path, results_folder, "bestNAS_results.csv")
     results = open(title, "w+")
     results.write('"Trial_id",')
     results.write('"Best exec",')
+    results.write('"Min val MSE",')
     results.write('"Min test MSE",')
     results.write('"Mean test MSE",')
     results.write('"Variance test MSE",')
@@ -669,6 +675,7 @@ if __name__ == "__main__":
     results.write('"params"')
     results.write('\n')
 
+    min_val_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_val_loss)))[1][0]
     min_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[1][0]
     mean_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[2]
     var_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[3]
@@ -680,6 +687,7 @@ if __name__ == "__main__":
 
     results.write('%s,' % trial_id)
     results.write('%d,' % exec_best_best)
+    results.write('%.5f,' % min_val_best)
     results.write('%.5f,' % min_res_best)
     results.write('%.5f,' % mean_res_best)
     results.write('%.5f,' % var_res_best)

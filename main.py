@@ -41,31 +41,35 @@ def create_dataset_window(X_all, Y_all, window_size=20):
     Y = np.stack(Y_list)  # (N, 2)
     return X, Y
 
-def create_tf_dataset(data_array, output_array, input_sequence_length=20, output_sequence_length=1, batch_size=1, shuffle=False, multi_horizon=False,):
+def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1):
     inputs = timeseries_dataset_from_array(
-        np.expand_dims(data_array[:-2, :], axis=-1),
+        data_array,
         None,
         sequence_length=input_sequence_length,
         shuffle=False,
-        batch_size=batch_size,
+        batch_size=None,
     )
 
-    target_offset = np.floor(input_sequence_length / 2).astype(int) + 1
-    target_offset2 = math.floor(input_sequence_length / 2) + 1
-    print(f"target_offset:{target_offset}")
-    print(f"target_offset2:{target_offset2}")
+    target_offset = math.floor(input_sequence_length / 2) + 1
     target_seq_length = output_sequence_length
+
     targets = timeseries_dataset_from_array(
-        output_array[target_offset:-target_offset, :],
+        output_array[target_offset:, :],
         None,
         sequence_length=target_seq_length,
         shuffle=False,
-        batch_size=batch_size,
+        batch_size=None,
     )
 
+    input_len = len(list(inputs))
+    target_len = len(list(targets))
+    min_len = min(input_len, target_len)
+
+    inputs = inputs.take(min_len)
+    targets = targets.take(min_len)
+
     dataset = tf.data.Dataset.zip((inputs, targets))
-    if shuffle:
-        dataset = dataset.shuffle(100)
+    dataset = dataset.batch(batch_size, drop_remainder=True)
 
     return dataset
 
@@ -271,15 +275,22 @@ def optimizer(args):
         args.folds = fold
 
         # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
-        res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
-        X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+        # res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
+        #X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
 
-        # create windows
-        X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
-        X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+        # # create windows
+        # X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
+        # X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+        #
+        # # test or ignore
+        # X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
 
-        # test or ignore
-        X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+        (X_train, Y_train), (X_val, Y_val), ( X_test, Y_test) = prepare_data(args)
+
+        print("Train X range:", Y_train[0].min(), Y_train[0].max())
+        print("Train X range:", Y_train[1].min(), Y_train[1].max())
+        print("Val X range:", Y_val[0].min(), Y_val[0].max())
+        print("Val Y range:", Y_val[1].min(), Y_val[1].max())
 
         # create model
         model = 0
@@ -309,9 +320,11 @@ def optimizer(args):
         metrics_curve(history, args)
 
         # 保存该fold最小的val_loss
-        min_val_loss = min(history.history['val_loss'])
-        val_losses.append(min_val_loss)
-        print(f"Fold {fold} best val_loss = {min_val_loss:.4f}")
+        mean_val_loss = np.mean(history.history['val_loss'])
+        val_losses.append(mean_val_loss)
+        test_loss = model.evaluate(X_test, Y_test, verbose=0)
+        print(f"Fold {fold} test_loss = {test_loss:.4f}")
+        print(f"Fold {fold} mean val_loss = {mean_val_loss:.4f}")
 
         # ====== 计算平均和标准差 ======
     val_losses = np.array(val_losses)
@@ -332,7 +345,6 @@ def optimizer(args):
         f.write(f"STD Validation Loss: {std_loss:.4f}\n")
 
     print(f"\nResults saved to {result_path}")
-
 
 #==========================================simple keras===============================================
 # simple keras automate search, the more complex contrl of autokeras, reference NAS_2.py or NAS_3.py
@@ -367,11 +379,49 @@ def prepare_data(args):
 
     X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
 
-    X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
-    X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
-    X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+    # X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
+    # X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+    # X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+    # return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
+    input_sequence_length, output_sequence_length, batch_size = 20, 1, 32
+    train_ds = create_tf_dataset(X_train, Y_train, input_sequence_length, output_sequence_length, batch_size)
+    val_ds = create_tf_dataset(X_val, Y_val, input_sequence_length, output_sequence_length, batch_size)
+    test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)
+    # for plot evaluate figure
+    all_train_x = []
+    all_train_y = []
 
-    return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
+    all_val_x = []
+    all_val_y = []
+
+    all_test_x = []
+    all_test_y = []
+
+    for batch_x, batch_y in train_ds:
+        all_train_x.append(batch_x.numpy())  # Convert to numpy array
+        all_train_y.append(batch_y.numpy())  # Convert to numpy array
+
+    train_x = np.concatenate(all_train_x, axis=0)
+    train_y = np.concatenate(all_train_y, axis=0)
+    train_y = np.squeeze(train_y, axis=1)
+
+    for batch_x, batch_y in val_ds:
+        all_val_x.append(batch_x.numpy())  # Convert to numpy array
+        all_val_y.append(batch_y.numpy())  # Convert to numpy array
+
+    val_x = np.concatenate(all_val_x, axis=0)
+    val_y = np.concatenate(all_val_y, axis=0)
+    val_y = np.squeeze(val_y, axis=1)
+
+    for batch_x, batch_y in test_ds:
+        all_test_x.append(batch_x.numpy())  # Convert to numpy array
+        all_test_y.append(batch_y.numpy())  # Convert to numpy array
+
+    test_x = np.concatenate(all_test_x, axis=0)
+    test_y = np.concatenate(all_test_y, axis=0)
+    test_y = np.squeeze(test_y, axis=1)
+
+    return (train_x, train_y), (val_x, val_y), (test_x, test_y)
 class LossPlotter(Callback):
     def __init__(self, save_dir, trial_id, execution_id):
         super().__init__()
@@ -452,7 +502,7 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
 
     tuner = MyTuner(
         hypermodel=lambda hp: build_model(hp, args),
-        objective="val_loss",
+        objective=keras_tuner.Objective("test_loss", "min"),
         max_trials=max_trials,
         seed=args.seed,
         executions_per_trial=executions_per_trial,
@@ -569,10 +619,10 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=777)
 
     # directory structure
-    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP1.csv')
+    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP4.csv')
     parser.add_argument('--output_dir', type=str, default='results/normal_train/one')
     parser.add_argument('--running_data_dir', type=str, default='temp/')
-    parser.add_argument('--folds', type=int, default='1')
+    parser.add_argument('--folds', type=int, default='6')
 
     # basic info
     parser.add_argument('--training_part', type=float, default='0.7')
@@ -594,12 +644,28 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # pre-prepare dataset for remote server training
+    # df = pd.read_csv(args.data_path, header=None)
+    # print("The whole dataset shape is:", df.shape)
+    #
+    # for fold in range(1, 7):
+    #     print(f"\n===== Training Fold {fold}/6 =====")
+    #     args.folds = fold
+    #
+    #     # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
+    #     (X_train, Y_train), (X_val, Y_val), (X_test, Y_test) = prepare_data(args)
+    #
+    #     print("Train X range:", Y_train[0].min(), Y_train[0].max())
+    #     print("Train Y range:", Y_train[1].min(), Y_train[1].max())
+    #     print("Val X range:", Y_val[0].min(), Y_val[0].max())
+    #     print("Val Y range:", Y_val[1].min(), Y_val[1].max())
+
     # # optimizer is the normal training function, which has fixed parameter
     # optimizer(args)
 
-    best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)
-    collect_tuner_results(results_path)
-
+    #
+    # best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)
+    # collect_tuner_results(results_path)
 
 
 

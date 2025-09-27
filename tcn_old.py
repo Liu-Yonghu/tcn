@@ -25,7 +25,6 @@ def adjust_dilations(dilations: list):
 
 
 class ResidualBlock(Layer):
-
     def __init__(self,
                  dilation_rate: int,
                  nb_filters: int,

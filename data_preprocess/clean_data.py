@@ -269,7 +269,7 @@ def analysis(exp, data, std_data, norm_data):
     data_collection["raw"]["mean_spatial_std"] = float(np.mean(spatial_std))
     data_collection["raw"]["median_spatial_std"] = float(np.median(spatial_std))
 
-    results = interpolation_data_by_field(data)
+    results,_ = interpolation_data_by_field(data)
     print(results)
 
     features = results.iloc[:, 1:]
@@ -349,7 +349,6 @@ def analysis(exp, data, std_data, norm_data):
                 f'{m.get("avg_col_std"):.5f},{m.get("zero_var_cols"):.5f},{m.get("mean_spatial_std"):.5f},{m.get("median_spatial_std"):.5f}\n'
             )
             results.write(line)
-
 def cleaning(exp):
     # default
     file_path = "./raw_data/data_VL53L7CH__AIKit__ZONE_8x8__20241029_115843.csv"
@@ -432,6 +431,15 @@ if __name__ == '__main__':
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP3.csv', index=False, header=False)
     df = pd.read_csv('clean_data/std_TOFEXP4.csv')
     data = df[df.columns[1:]].to_csv('../exp_data/std_TOFEXP4.csv', index=False, header=False)
+
+    df = pd.read_csv('clean_data/norm_TOFEXP1.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOFEXP1.csv', index=False, header=False)
+    df = pd.read_csv('clean_data/norm_TOFEXP2.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOFEXP2.csv', index=False, header=False)
+    df = pd.read_csv('clean_data/norm_TOFEXP3.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOFEXP3.csv', index=False, header=False)
+    df = pd.read_csv('clean_data/norm_TOFEXP4.csv')
+    data = df[df.columns[1:]].to_csv('../exp_data/norm_TOFEXP4.csv', index=False, header=False)
 
 
     # cleaning(4)

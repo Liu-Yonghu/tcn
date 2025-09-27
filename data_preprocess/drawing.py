@@ -1,5 +1,6 @@
 import os
 import matplotlib.animation as animation
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -10,14 +11,16 @@ def animate_depth(frames, save_path, isHandled=None):
     fig, ax = plt.subplots()
     if isHandled == "minMax":
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=0, vmax=1)
+        plt.colorbar(im, ax=ax, label="Depth (minMax)")
     elif isHandled == "zScore":
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=-3, vmax=3)
+        plt.colorbar(im, ax=ax, label="Depth (z-Score)")
     else:
         min = np.min(frames)
         max = np.max(frames)
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=min, vmax=max)
+        plt.colorbar(im, ax=ax, label="Depth (mm)")
 
-    plt.colorbar(im, ax=ax, label="Depth (m)")
     frame_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
                          verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
     def update(frame_index):
@@ -26,8 +29,8 @@ def animate_depth(frames, save_path, isHandled=None):
         return [im, frame_text]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), interval=200, blit=True, repeat=False)
-    ani.save(save_path, writer="ffmpeg", fps=5)
-    #plt.show()
+    #ani.save(save_path, writer="ffmpeg", fps=5)
+    plt.show()
     plt.close()
     return ani
 
@@ -140,14 +143,16 @@ def animate_depth_with_mask(frames, masks, save_path, isHandled=None):
     fig, ax = plt.subplots()
     if isHandled == "minMax":
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=0, vmax=1)
+        plt.colorbar(im, ax=ax, label="Depth (minMax)")
     elif isHandled == "zScore":
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=-3, vmax=3)
+        plt.colorbar(im, ax=ax, label="Depth (z-Score)")
     else:
         min = np.min(frames)
         max = np.max(frames)
         im = ax.imshow(frames[0], cmap="jet", animated=True, vmin=min, vmax=max)
+        plt.colorbar(im, ax=ax, label="Depth (mm)")
 
-    plt.colorbar(im, ax=ax, label="Depth (m)")
     frame_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
                          verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
 
@@ -156,6 +161,7 @@ def animate_depth_with_mask(frames, masks, save_path, isHandled=None):
     mask_rgba[..., 3] = masks[0] * 1.0          # alpha 通道 = 1 表示不透明
     mask_im = ax.imshow(mask_rgba, animated=True, zorder=10)
 
+    mask_patch = mpatches.Patch(color="black", alpha=0.6, label="Mask = missing data")
     def update(frame_index):
         im.set_array(frames[frame_index])
 
@@ -211,8 +217,8 @@ def generate_animate_depth_mask(exp):
 
 
 if __name__ == "__main__":
-    os.makedirs("./animation/", exist_ok=True)
-    generate_animate_depth_mask(4)
+    # os.makedirs("./animation/", exist_ok=True)
+    # generate_animate_depth_mask(4)
 
     # data = pd.read_csv('./clean_data/std_TOFEXP4.csv', usecols=range(1, 65)).to_numpy()
     # frames = data.reshape(-1, 8, 8)
@@ -221,15 +227,15 @@ if __name__ == "__main__":
     # data = pd.read_csv('./raw_data/features.csv', usecols=range(1, 65)).to_numpy()
     # frames = (data/1000).reshape(-1, 8, 8)
 
-    #data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
-    #frames = (data/1000).reshape(-1, 8, 8)
+    data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
+    frames = (data).reshape(-1, 8, 8)
 
     # data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
     # frames = (data).reshape(-1, 8, 8)
-    #isHandled = "zScore" #"minMax"
+    isHandled =None #"zScore" "minMax"
 
-    #check_one_frame(data[0], "./animation/std_TOFEXP4.jpg", isHandled)
-    #animate_depth(frames, "./animation/std_TOFEXP4.mp4", isHandled)
+    check_one_frame(data[0], "./animation/std_TOFEXP4.jpg", isHandled)
+    animate_depth(frames, "./animation/std_TOFEXP4.mp4", isHandled)
 
 
     # labels = pd.read_csv('../exp_data/std_TOFEXP4.csv', usecols=range(64, 66)).to_numpy()

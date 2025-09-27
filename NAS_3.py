@@ -78,8 +78,6 @@ def load_dataset(path, file_training, file_valid, file_testing):
     Y_test = np.array(test_Y)  # np.transpose(test2_Y)
 
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
-
-
 def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1):
     inputs = timeseries_dataset_from_array(
         data_array,
@@ -111,8 +109,6 @@ def create_tf_dataset(data_array, output_array, input_sequence_length, output_se
     dataset = dataset.batch(batch_size, drop_remainder=True)
 
     return dataset
-
-
 def model_TCN(hidden, num_filters, k_size, dense):
     x = layers.Input(shape=(20, 64))
     tcn_out = TCN(nb_filters=num_filters, kernel_size=k_size, nb_stacks=1, dilations=[2 ** i for i in range(hidden)],
@@ -126,8 +122,19 @@ def model_TCN(hidden, num_filters, k_size, dense):
     model = models.Model(x, dense_out)
     # model.load_weights(path_tcn)
     return model
+class RootMeanSquaredError(keras.metrics.Metric):
+    def __init__(self, name="rmse", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.mse = keras.metrics.MeanSquaredError()
 
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.mse.update_state(y_true, y_pred, sample_weight)
 
+    def result(self):
+        return tf.sqrt(self.mse.result())
+
+    def reset_state(self):
+        self.mse.reset_state()
 class MyHyperModel(keras_tuner.HyperModel):
     def __init__(self, results_folder=None):
         super().__init__()
@@ -142,6 +149,8 @@ class MyHyperModel(keras_tuner.HyperModel):
         print("tcn_out:", tcn_output.shape)
         full_model = models.Model(inputs=x, outputs=tcn_output)
 
+        print("full_model.summary()")
+        full_model.summary()
         return full_model
 
     def fit(self, hp, model, trial, execution, train_ds, val_ds, test_ds, path_save, callbacks=None, **kwargs):
@@ -150,6 +159,8 @@ class MyHyperModel(keras_tuner.HyperModel):
         val_loss_values = np.zeros(epochs)
         train_acc_values = np.zeros(epochs)
         val_acc_values = np.zeros(epochs)
+        train_rmse_values = np.zeros(epochs)
+        val_rmse_values = np.zeros(epochs)
         best_epoch = 0
         best_val_loss = 100
         best_test_loss = 100
@@ -162,9 +173,12 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         # Specify the performance metric
         optimizer = keras.optimizers.Adamax(learning_rate=0.0001)
-        train_acc = keras.metrics.MeanSquaredError()
-        valid_acc = keras.metrics.MeanSquaredError()
-        test_acc = keras.metrics.MeanSquaredError()
+        train_acc = tf.keras.metrics.MeanAbsoluteError()
+        valid_acc = tf.keras.metrics.MeanAbsoluteError()
+        test_acc = tf.keras.metrics.MeanAbsoluteError()
+        train_rmse = RootMeanSquaredError()
+        valid_rmse = RootMeanSquaredError()
+        test_rmse = RootMeanSquaredError()
 
         save_dir = os.path.join(self.results_folder, f"trial_{trial.trial_id}")
         os.makedirs(save_dir, exist_ok=True)
@@ -176,10 +190,6 @@ class MyHyperModel(keras_tuner.HyperModel):
                 # Forward pass of student
                 student_predictions = student_model(x, training=True)
                 student_predictions = tf.squeeze(student_predictions)
-                # print(y.shape)
-                # print(student_predictions.shape)
-                # Compute losses
-                # student_loss = tf.reduce_mean(student_loss_fn(y, student_predictions))
                 student_loss = student_loss_fn(y, student_predictions)
 
             # Compute gradients
@@ -191,6 +201,7 @@ class MyHyperModel(keras_tuner.HyperModel):
 
             # Update the metrics configured in `compile()`.
             train_acc.update_state(y, student_predictions)
+            train_rmse.update_state(y, student_predictions)
             return student_loss
 
         @tf.function(jit_compile=True)
@@ -203,6 +214,7 @@ class MyHyperModel(keras_tuner.HyperModel):
 
             # Update the metrics.
             valid_acc.update_state(y, y_prediction_val)
+            valid_rmse.update_state(y, y_prediction_val)
             return val_loss
 
         # Assign the model to the callbacks.
@@ -225,8 +237,11 @@ class MyHyperModel(keras_tuner.HyperModel):
 
             loss_values[epoch] = tot_s_loss
             train_acc_values[epoch] = train_acc.result()
+            train_rmse_values[epoch] = train_rmse.result()
+
             # Reset training metrics at the end of each epoch
             train_acc.reset_state()
+            train_rmse.reset_state()
 
             tot_v_loss = 0
             for step_val, (X_val, Y_val) in enumerate(val_ds):
@@ -238,13 +253,19 @@ class MyHyperModel(keras_tuner.HyperModel):
 
             val_loss_values[epoch] = tot_v_loss
             val_acc_values[epoch] = valid_acc.result()
+            val_rmse_values[epoch] = valid_rmse.result()
+            valid_rmse.reset_state()
             valid_acc.reset_state()
 
             for callback in callbacks:
                 # The "my_metric" is the objective passed to the tuner.
-                callback.on_epoch_end(epoch, logs={"val_loss": val_loss_values[epoch], "loss": loss_values[epoch]})
+                callback.on_epoch_end(epoch, logs={"val_loss": val_loss_values[epoch], "loss": loss_values[epoch],
+                                                   "val_rmse": val_rmse_values[epoch], "train_rmse": train_rmse_values[epoch],
+                                                   "val_mae": val_acc_values[epoch], "train_mae": train_acc_values[epoch]})
 
-            print(f"Epoch {epoch}, train_loss: {loss_values[epoch]:.5f}, val_loss: {val_loss_values[epoch]:.5f}")
+            print(f"Epoch {epoch}, train_loss: {loss_values[epoch]:.5f}, val_loss: {val_loss_values[epoch]:.5f},"
+                  f"train_rmse: {train_rmse_values[epoch]:.5f}, val_rmse: {val_rmse_values[epoch]:.5f},"
+                  f"train_mae: {train_acc_values[epoch]:.5f}, val_mae: {val_acc_values[epoch]:.5f}")
 
             if epoch < 5:
                 wait = 0
@@ -309,10 +330,10 @@ class MyHyperModel(keras_tuner.HyperModel):
         test_y = np.concatenate(all_test_y, axis=0)
         test_y = np.squeeze(test_y, axis=1)
 
-        best_test_loss = None
         try:
-            model.load_weights(os.path.join(save_dir, f"ckpt_exec{execution}.weights.h5"))
-            model.compile(optimizer='adam', loss='mse')
+            model.load_weights(os.path.join(save_dir, f"ckpt_exec{execution}.keras"))
+            model.compile(optimizer='adam', loss='mse',   metrics=[RootMeanSquaredError(name="rmse"),
+             tf.keras.metrics.MeanAbsoluteError(name="mae")])
             # Evaluate the model
             # best_test_loss = model.evaluate(test_x, test_y)
             best_test_loss = model.evaluate(test_x, test_y, return_dict=True)["loss"]
@@ -484,30 +505,48 @@ class BayesianOptimization(keras_tuner.BayesianOptimization):
         return os.path.join(
             # Each checkpoint is saved in its own directory.
             self.get_trial_dir(trial_id),
-            "ckpt_exec" + str(execution) + ".weights.h5"
+                "ckpt_exec" + str(execution) + ".keras"
         )
 
 
 class Logger(Callback):
     def on_train_begin(self, logs=None):
-        # Create scores holder
-        global val_score_holder
+        global val_score_holder, train_score_holder, test_score_holder
+        global val_rmse_holder, train_rmse_holder
+        global val_acc_holder, train_acc_holder
+
+        # loss
         val_score_holder = []
-        global test_score_holder
-        test_score_holder = []
-        global train_score_holder
         train_score_holder = []
+        test_score_holder = []
+
+        # RMSE
+        val_rmse_holder = []
+        train_rmse_holder = []
+
+        # MAE
+        val_acc_holder = []
+        train_acc_holder = []
+
 
     def on_epoch_end(self, epoch, logs):
         # Access tuner and logger from the global workspace
         global val_score_holder
+        global val_rmse_holder
+        global val_acc_holder
         global train_score_holder
+        global train_rmse_holder
+        global train_acc_holder
         # global test_score_holder
         # print(logs)
         # Store scores
         val_score_holder.append(logs['val_loss'])
         # test_score_holder.append(logs['test_loss'])
         train_score_holder.append(logs['loss'])
+        val_rmse_holder.append(logs['val_rmse'])
+        train_rmse_holder.append(logs['train_rmse'])
+        val_acc_holder.append(logs['val_mae'])
+        train_acc_holder.append(logs['train_mae'])
 
     def on_train_end(self, logs=None):
         # Access tuner and score holders from the global workspace
@@ -522,23 +561,32 @@ class Logger(Callback):
         # Create new attributes if not already present i.e. new trial
         if 'rep_val_loss' not in dir(tuner.oracle.trials[trial]):
             tuner.oracle.trials[trial].rep_val_loss = []
-            tuner.oracle.trials[trial].rep_test_loss = []
             tuner.oracle.trials[trial].rep_train_loss = []
+            tuner.oracle.trials[trial].rep_test_loss = []
 
-        # Add min val loss and corresponding training loss
-        tuner.oracle.trials[trial].rep_val_loss.append(np.min(val_score_holder))
-        tuner.oracle.trials[trial].rep_train_loss.append(train_score_holder[np.argmin(val_score_holder)])
-        tuner.oracle.trials[trial].rep_test_loss.append(logs['best_test_loss'])
+            tuner.oracle.trials[trial].rep_val_rmse = []
+            tuner.oracle.trials[trial].rep_train_rmse = []
+            tuner.oracle.trials[trial].rep_val_mae = []
+            tuner.oracle.trials[trial].rep_train_mae = []
 
+        best_epoch_idx = np.argmin(val_score_holder)
+
+        tuner.oracle.trials[trial].rep_val_loss.append(val_score_holder[best_epoch_idx])
+        tuner.oracle.trials[trial].rep_train_loss.append(train_score_holder[best_epoch_idx])
+        tuner.oracle.trials[trial].rep_test_loss.append(logs.get('best_test_loss', None))
+
+        tuner.oracle.trials[trial].rep_val_rmse.append(val_rmse_holder[best_epoch_idx])
+        tuner.oracle.trials[trial].rep_train_rmse.append(train_rmse_holder[best_epoch_idx])
+        tuner.oracle.trials[trial].rep_val_mae.append(val_acc_holder[best_epoch_idx])
+        tuner.oracle.trials[trial].rep_train_mae.append(train_acc_holder[best_epoch_idx])
 
 def printTable(path, tuner):
     print(tuner.oracle.max_trials)
-    min_res = np.zeros(tuner.oracle.max_trials)
-    mean_res = np.zeros(tuner.oracle.max_trials)
-    var_res = np.zeros(tuner.oracle.max_trials)
-    exec_best = np.zeros(tuner.oracle.max_trials)
-    ##
-    min_val = np.zeros(tuner.oracle.max_trials)
+    min_res = np.zeros(tuner.oracle.max_trials)   # min test loss
+    mean_res = np.zeros(tuner.oracle.max_trials)  # mean test loss
+    var_res = np.zeros(tuner.oracle.max_trials)   # variance test loss
+    exec_best = np.zeros(tuner.oracle.max_trials) # best execution index
+    min_val = np.zeros(tuner.oracle.max_trials)   # min val loss
 
     title = os.path.join(path, results_folder, "NAS_results.csv")
     results = open(title, "w+")
@@ -550,6 +598,10 @@ def printTable(path, tuner):
     results.write('"Min test MSE",')
     results.write('"Mean test MSE",')
     results.write('"Variance test MSE",')
+    results.write('"Best val RMSE",')
+    results.write('"Best train RMSE",')
+    results.write('"Best val MAE",')
+    results.write('"Best train MAE",')
     results.write('"Hidden",')
     results.write('"Nb_filters",')
     results.write('"k_size",')
@@ -558,41 +610,49 @@ def printTable(path, tuner):
     results.write('\n')
 
     for n in range(tuner.oracle.max_trials):
-        if tuner.oracle.max_trials >= 10:
-            trial_id = "{:02d}".format(n)
-        else:
-            trial_id = "{:01d}".format(n)
-        # print("trial_id:",trial_id)
-        # print(tuner.oracle.trials['0'])
-        min_val[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_val_loss)))[1][0]
-        min_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[1][0]
-        mean_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[2]
-        var_res[n] = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[3]
-        exec_best[n] = np.argmin(tuner.oracle.trials[trial_id].rep_test_loss)
-        hp_tmp = tuner.oracle.trials[trial_id].hyperparameters
+        trial_id = f"{n:02d}" if tuner.oracle.max_trials >= 10 else f"{n:01d}"
+        trial = tuner.oracle.trials[trial_id]
 
+        min_val[n] = np.min(trial.rep_val_loss)
+        min_res[n] = np.min(trial.rep_test_loss)
+        mean_res[n] = np.mean(trial.rep_test_loss)
+        var_res[n] = np.var(trial.rep_test_loss)
+        exec_best[n] = np.argmin(trial.rep_test_loss)
+
+        best_idx = np.argmin(trial.rep_val_loss)
+        best_val_rmse = trial.rep_val_rmse[best_idx]
+        best_train_rmse = trial.rep_train_rmse[best_idx]
+        best_val_mae = trial.rep_val_mae[best_idx]
+        best_train_mae = trial.rep_train_mae[best_idx]
+
+        hp_tmp = trial.hyperparameters
         model_tmp = tuner.hypermodel.build(hp_tmp)
         params = model_tmp.count_params()
 
-        results.write('%d,' % n)
-        results.write('%d,' % exec_best[n])
-        results.write('%.5f,' % min_val[n])
-        results.write('%.5f,' % min_res[n])
-        results.write('%.5f,' % mean_res[n])
-        results.write('%.5f,' % var_res[n])
-        results.write('%d,' % hp_tmp['hidden'])
-        results.write('%d,' % hp_tmp['nb_filters'])
-        results.write('%d,' % hp_tmp['k_size'])
-        results.write('%d,' % hp_tmp['dense'])
-        results.write('%d' % params)
-
+        results.write(f'{n},')
+        results.write(f'{int(exec_best[n])},')
+        results.write(f'{min_val[n]:.5f},')
+        results.write(f'{min_res[n]:.5f},')
+        results.write(f'{mean_res[n]:.5f},')
+        results.write(f'{var_res[n]:.5f},')
+        results.write(f'{best_val_rmse:.5f},')
+        results.write(f'{best_train_rmse:.5f},')
+        results.write(f'{best_val_mae:.5f},')
+        results.write(f'{best_train_mae:.5f},')
+        results.write(f'{hp_tmp["hidden"]},')
+        results.write(f'{hp_tmp["nb_filters"]},')
+        results.write(f'{hp_tmp["k_size"]},')
+        results.write(f'{hp_tmp["dense"]},')
+        results.write(f'{params}')
         results.write('\n')
+
     results.close()
 
     best_test_loss_trial = np.argmin(min_res)
     best_test_loss_exec = exec_best[best_test_loss_trial]
 
     return best_test_loss_trial, best_test_loss_exec
+
 
 
 if __name__ == "__main__":
@@ -620,7 +680,7 @@ if __name__ == "__main__":
     output_sequence_length = 1
 
     # Parent Directory path
-    parent_dir = "temp/std_TOFEXP1/2"
+    parent_dir = "temp/norm_TOFEXP1/2"
     exp = parent_dir.split("temp/", 1)[1]
 
     results_folder = os.path.join("autokeras_res", exp)
@@ -661,43 +721,61 @@ if __name__ == "__main__":
         trial_id = "{:01d}".format(trial_id_tmp)
 
     title = os.path.join(path, results_folder, "bestNAS_results.csv")
-    results = open(title, "w+")
-    results.write('"Trial_id",')
-    results.write('"Best exec",')
-    results.write('"Min val MSE",')
-    results.write('"Min test MSE",')
-    results.write('"Mean test MSE",')
-    results.write('"Variance test MSE",')
-    results.write('"Hidden",')
-    results.write('"Nb_filters",')
-    results.write('"k_size",')
-    results.write('"dense",')
-    results.write('"params"')
-    results.write('\n')
+    with open(title, "w+") as results:
+        # Header
+        results.write('"Trial_id",')
+        results.write('"Best exec",')
+        results.write('"Min val MSE",')
+        results.write('"Min test MSE",')
+        results.write('"Mean test MSE",')
+        results.write('"Variance test MSE",')
+        results.write('"Best val RMSE",')
+        results.write('"Best train RMSE",')
+        results.write('"Best val MAE",')
+        results.write('"Best train MAE",')
+        results.write('"Hidden",')
+        results.write('"Nb_filters",')
+        results.write('"k_size",')
+        results.write('"dense",')
+        results.write('"params"')
+        results.write('\n')
 
-    min_val_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_val_loss)))[1][0]
-    min_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[1][0]
-    mean_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[2]
-    var_res_best = (stats.describe(np.array(tuner.oracle.trials[trial_id].rep_test_loss)))[3]
-    exec_best_best = np.argmin(tuner.oracle.trials[trial_id].rep_test_loss)
-    hp_tmp = tuner.oracle.trials[trial_id].hyperparameters
+        trial = tuner.oracle.trials[trial_id]
+        hp_tmp = trial.hyperparameters
+        model_tmp = tuner.hypermodel.build(hp_tmp)
+        params = model_tmp.count_params()
 
-    model_tmp = tuner.hypermodel.build(hp_tmp)
-    params = model_tmp.count_params()
+        min_val_best = np.min(trial.rep_val_loss)
+        min_res_best = np.min(trial.rep_test_loss)
+        mean_res_best = np.mean(trial.rep_test_loss)
+        var_res_best = np.var(trial.rep_test_loss)
+        exec_best_best = np.argmin(trial.rep_test_loss)
 
-    results.write('%s,' % trial_id)
-    results.write('%d,' % exec_best_best)
-    results.write('%.5f,' % min_val_best)
-    results.write('%.5f,' % min_res_best)
-    results.write('%.5f,' % mean_res_best)
-    results.write('%.5f,' % var_res_best)
-    results.write('%d,' % hp_tmp['hidden'])
-    results.write('%d,' % hp_tmp['nb_filters'])
-    results.write('%d,' % hp_tmp['k_size'])
-    results.write('%d,' % hp_tmp['dense'])
-    results.write('%d' % params)
+        best_idx = np.argmin(trial.rep_val_loss)
+        best_val_rmse = trial.rep_val_rmse[best_idx]
+        best_train_rmse = trial.rep_train_rmse[best_idx]
+        best_val_mae = trial.rep_val_mae[best_idx]
+        best_train_mae = trial.rep_train_mae[best_idx]
 
-    results.write('\n')
+        results.write('%s,' % trial_id)
+        results.write('%d,' % exec_best_best)
+        results.write('%.5f,' % min_val_best)
+        results.write('%.5f,' % min_res_best)
+        results.write('%.5f,' % mean_res_best)
+        results.write('%.5f,' % var_res_best)
+
+        results.write(f'{best_val_rmse:.5f},')
+        results.write(f'{best_train_rmse:.5f},')
+        results.write(f'{best_val_mae:.5f},')
+        results.write(f'{best_train_mae:.5f},')
+        results.write(f'{hp_tmp["hidden"]},')
+        results.write(f'{hp_tmp["nb_filters"]},')
+        results.write(f'{hp_tmp["k_size"]},')
+        results.write(f'{hp_tmp["dense"]},')
+        results.write(f'{params}')
+        results.write('\n')
+
+
 
 
 

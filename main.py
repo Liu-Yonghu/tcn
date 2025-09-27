@@ -619,7 +619,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=777)
 
     # directory structure
-    parser.add_argument('--data_path', type=str, default='./exp_data/std_TOFEXP4.csv')
+    parser.add_argument('--data_path', type=str, default='./exp_data/norm_TOFEXP4.csv')
     parser.add_argument('--output_dir', type=str, default='results/normal_train/one')
     parser.add_argument('--running_data_dir', type=str, default='temp/')
     parser.add_argument('--folds', type=int, default='6')
@@ -647,7 +647,7 @@ if __name__ == '__main__':
     # pre-prepare dataset for remote server training
     # df = pd.read_csv(args.data_path, header=None)
     # print("The whole dataset shape is:", df.shape)
-    #
+
     # for fold in range(1, 7):
     #     print(f"\n===== Training Fold {fold}/6 =====")
     #     args.folds = fold
@@ -660,8 +660,8 @@ if __name__ == '__main__':
     #     print("Val X range:", Y_val[0].min(), Y_val[0].max())
     #     print("Val Y range:", Y_val[1].min(), Y_val[1].max())
 
-    # # optimizer is the normal training function, which has fixed parameter
-    # optimizer(args)
+    # optimizer is the normal training function, which has fixed parameter
+    optimizer(args)
 
     #
     # best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)

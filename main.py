@@ -1,83 +1,26 @@
 import os
 import json
 import utils
-import math
-from tcn_old import TCN
-from tcn_simple import TCN_model
 import pandas as pd
-import tcn_model
 from math import inf
 import numpy as np
 import tcn_model as tm
 import matplotlib.pyplot as plt
 import tensorflow.keras.backend as K
 import argparse
-from utils import rmse
+from utils import rmse, create_tf_dataset, create_dataset_window, compute_sparc
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.losses import MeanSquaredError
-from tensorflow.keras.preprocessing import timeseries_dataset_from_array
-import matplotlib
 import keras_tuner
-from keras import layers, models
-import tensorflow as tf
-from keras.callbacks import TensorBoard,Callback
-import datetime
+from keras.callbacks import TensorBoard, Callback
 
-#matplotlib.use("Agg")
-def create_dataset_window(X_all, Y_all, window_size=20):
-    X_list = []
-    Y_list = []
 
-    for i in range(len(X_all) - window_size + 1):
-        X_seq = X_all[i: i + window_size,:]        # shape (20, 64)
-        #Y_target = Y_all[i + window_size-1]
-        Y_target = Y_all[i + np.floor(window_size / 2).astype(int) + 1,:]     # from  middle smaples
 
-        X_list.append(X_seq)
-        Y_list.append(Y_target)
-
-    X = np.stack(X_list)  # (N, 15, 64)
-    Y = np.stack(Y_list)  # (N, 2)
-    return X, Y
-
-def create_tf_dataset(data_array, output_array, input_sequence_length, output_sequence_length, batch_size=1):
-    inputs = timeseries_dataset_from_array(
-        data_array,
-        None,
-        sequence_length=input_sequence_length,
-        shuffle=False,
-        batch_size=None,
-    )
-
-    target_offset = math.floor(input_sequence_length / 2) + 1
-    target_seq_length = output_sequence_length
-
-    targets = timeseries_dataset_from_array(
-        output_array[target_offset:, :],
-        None,
-        sequence_length=target_seq_length,
-        shuffle=False,
-        batch_size=None,
-    )
-
-    input_len = len(list(inputs))
-    target_len = len(list(targets))
-    min_len = min(input_len, target_len)
-
-    inputs = inputs.take(min_len)
-    targets = targets.take(min_len)
-
-    dataset = tf.data.Dataset.zip((inputs, targets))
-    dataset = dataset.batch(batch_size, drop_remainder=True)
-
-    return dataset
-
+# matplotlib.use("Agg")
 def trajectory_curve(labels, GT_value, args=None):
     X_T = GT_value[:, :1]
     Y_T = GT_value[:, 1:]
     X_P = labels[:, :1]
-    Y_P= labels[:, 1:]
+    Y_P = labels[:, 1:]
     # create figure
     plt.figure(figsize=(6, 6))
     plt.plot(X_P, Y_P, marker='x', linestyle='-', color='blue', label='Prediction')
@@ -110,6 +53,8 @@ def trajectory_curve(labels, GT_value, args=None):
     filepath = os.path.join(save_path, filename)
     plt.savefig(filepath, dpi=600)
     plt.close()
+
+
 def loss_curve(history, args=None):
     plt.figure(figsize=(8, 5))
     plt.plot(history.history['loss'], label='Train Loss (MSE)')
@@ -136,6 +81,7 @@ def loss_curve(history, args=None):
     filepath = os.path.join(save_path, filename)
     plt.savefig(filepath, dpi=600)
     plt.close()
+
 
 def metrics_curve(history, args=None):
     rmse = history.history['rmse']
@@ -174,9 +120,10 @@ def metrics_curve(history, args=None):
     plt.savefig(filepath, dpi=600)
     plt.close()
 
+
 def slice_dataset(df, training_part, validing_part, running_data_dir, args=None):
     num_data = len(df)
-    folds =args.folds
+    folds = args.folds
     train_len = int(training_part * num_data)
     val_len = int(validing_part * num_data)
     ignore_len = num_data - train_len - val_len
@@ -219,46 +166,17 @@ def slice_dataset(df, training_part, validing_part, running_data_dir, args=None)
     exp = os.path.splitext(os.path.basename(args.data_path))[0]
     save_path = os.path.join(running_data_dir, exp, str(folds))
     os.makedirs(save_path, exist_ok=True)
-    df_train.to_csv(os.path.join(save_path, "train.csv"), index=False)
-    df_val.to_csv(os.path.join(save_path, "val.csv"), index=False)
-    df_ignore.to_csv(os.path.join(save_path, "test.csv"), index=False)
+    df_train.to_csv(os.path.join(save_path, "train.csv"), header=False, index=False)
+    df_val.to_csv(os.path.join(save_path, "val.csv"), header=False, index=False)
+    df_ignore.to_csv(os.path.join(save_path, "test.csv"), header=False, index=False)
 
     # save path, slice, info etc
     return {
         "save_path": save_path,
-        "slices": slices,         # {'train': slice(...), 'val': ..., 'ignore': ...}
-        "ranges": ranges,         # {'train': (start, stop), ...}
-        "lengths": segments,      # {'train': L, 'val': L, 'ignore': L}
+        "slices": slices,  # {'train': slice(...), 'val': ..., 'ignore': ...}
+        "ranges": ranges,  # {'train': (start, stop), ...}
+        "lengths": segments,  # {'train': L, 'val': L, 'ignore': L}
     }
-
-def slice_dataset2(df, training_part, validing_part, running_data_dir, args=None):
-    ''' try to slice dataset into n folds '''
-    # slide the data into three part
-    num_data = len(df)
-    folds = args.folds
-    part = int(num_data/folds)
-
-
-    train_len = int((folds-2)*part)
-    val_len = part
-    ignore_len = num_data - train_len - val_len
-
-    if folds == 1:
-        train_start = 0
-        val_start = int(training_part * num_data)
-        ignore_start = int((training_part + validing_part) * num_data)
-
-    df_train = df.iloc[train_start:val_start]
-    df_val = df.iloc[val_start:ignore_start]
-    df_test = df.iloc[ignore_start:num_data]
-    # 保存为新的 CSV 文件
-    save_path = os.path.join(running_data_dir, str(folds))
-    os.makedirs(save_path, exist_ok=True)
-    df_train.to_csv(os.path.join(save_path, "train.csv"), index=False)
-    df_val.to_csv(os.path.join(save_path, "val.csv"), index=False)
-    df_test.to_csv(os.path.join(save_path, "test.csv"), index=False)
-    return save_path
-
 def optimizer(args):
     # create folders which used for results and temp files
     for path in [args.output_dir, args.running_data_dir]:
@@ -275,17 +193,23 @@ def optimizer(args):
         args.folds = fold
 
         # slice the data set into training(0.7) ,validation(0.15), ignored part(0.15)
-        # res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
-        #X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+        res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
 
-        # # create windows
-        # X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
-        # X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
-        #
-        # # test or ignore
-        # X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+        if args.data_source == "ir":
+            X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+        elif args.data_source == "mmwave":
+            X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_mmwave(res["save_path"], feature=3)
+        else:
+            raise ValueError(f"Unsupported data source: {args.data_source}")
 
-        (X_train, Y_train), (X_val, Y_val), ( X_test, Y_test) = prepare_data(args)
+        # create windows
+        X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
+        X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
+
+        # test or ignore
+        X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
+
+        # (X_train, Y_train), (X_val, Y_val), (X_test, Y_test) = prepare_data(args)
 
         print("Train X range:", Y_train[0].min(), Y_train[0].max())
         print("Train X range:", Y_train[1].min(), Y_train[1].max())
@@ -296,10 +220,10 @@ def optimizer(args):
         model = 0
         if args.model == "simple":
             model = tm.model_TCN_simple(hidden=args.hidden, num_filters=args.num_filters,
-                                        k_size=args.kernel_size, dense=args.dense)
+                                        k_size=args.kernel_size, dense=args.dense, source=args.data_source)
         elif args.model == "complete":
             model = tm.model_TCN_complete(hidden=args.hidden, num_filters=args.num_filters,
-                                          k_size=args.kernel_size, dense=args.dense)
+                                          k_size=args.kernel_size, dense=args.dense, source=args.data_source)
 
         # compile
         model.compile(optimizer=args.optimizer, loss=args.loss, metrics=args.metrics)
@@ -319,14 +243,14 @@ def optimizer(args):
         loss_curve(history, args)
         metrics_curve(history, args)
 
-        # 保存该fold最小的val_loss
+        # 保存该fold mean 的val_loss
         mean_val_loss = np.mean(history.history['val_loss'])
         val_losses.append(mean_val_loss)
-        test_loss = model.evaluate(X_test, Y_test, verbose=0)
-        print(f"Fold {fold} test_loss = {test_loss:.4f}")
+        mean_test_loss = np.mean(model.evaluate(X_test, Y_test, verbose=0))
+        print(f"Fold {fold} test_loss = {mean_test_loss:.4f}")
         print(f"Fold {fold} mean val_loss = {mean_val_loss:.4f}")
 
-        # ====== 计算平均和标准差 ======
+    # ====== calculate mean and standard deviation of 6 folds ======
     val_losses = np.array(val_losses)
     mean_loss = np.mean(val_losses)
     std_loss = np.std(val_losses, ddof=1)
@@ -346,22 +270,26 @@ def optimizer(args):
 
     print(f"\nResults saved to {result_path}")
 
-#==========================================simple keras===============================================
+
+# ==========================================simple keras===============================================
 # simple keras automate search, the more complex contrl of autokeras, reference NAS_2.py or NAS_3.py
 def build_model(hp, args):
+    model = None
     if args.model == "simple":
         model = tm.model_TCN_simple(
             hidden=hp.Choice("hidden", [2, 3, 4]),
             num_filters=hp.Choice("nb_filters", [8, 16, 32]),
             k_size=hp.Choice("k_size", [2, 3, 4, 5]),
-            dense=hp.Choice("dense", [8, 16, 32])
+            dense=hp.Choice("dense", [8, 16, 32]),
+            source=args.data_source
         )
     elif args.model == "complete":
         model = tm.model_TCN_complete(
             hidden=hp.Choice("hidden", [2, 3, 4]),
             num_filters=hp.Choice("nb_filters", [8, 16, 32]),
             k_size=hp.Choice("k_size", [2, 3, 4, 5]),
-            dense=hp.Choice("dense", [8, 16, 32])
+            dense=hp.Choice("dense", [8, 16, 32]),
+            source=args.data_source
         )
 
     model.compile(
@@ -370,6 +298,8 @@ def build_model(hp, args):
         metrics=args.metrics
     )
     return model
+
+
 def prepare_data(args):
     df = pd.read_csv(args.data_path, header=None)
     print("The whole dataset shape is:", df.shape)
@@ -377,13 +307,14 @@ def prepare_data(args):
     res = slice_dataset(df, args.training_part, args.validing_part, args.running_data_dir, args)
     print("data partition saved in:", res["save_path"])
 
-    X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+    if args.data_source == "ir":
+        X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_ir(res["save_path"], feature=64)
+    elif args.data_source == "mmwave":
+        X_train, Y_train, X_val, Y_val, X_test, Y_test = utils.load_dataset_mmwave(res["save_path"], feature=3)
+    else:
+        raise ValueError(f"Unsupported data source: {args.data_source}")
 
-    # X_train, Y_train = create_dataset_window(X_train, Y_train, window_size=args.time_windows)
-    # X_val, Y_val = create_dataset_window(X_val, Y_val, window_size=args.time_windows)
-    # X_test, Y_test = create_dataset_window(X_test, Y_test, window_size=args.time_windows)
-    # return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
-    input_sequence_length, output_sequence_length, batch_size = 20, 1, 32
+    input_sequence_length, output_sequence_length, batch_size = args.time_windows, 1, args.batch_size
     train_ds = create_tf_dataset(X_train, Y_train, input_sequence_length, output_sequence_length, batch_size)
     val_ds = create_tf_dataset(X_val, Y_val, input_sequence_length, output_sequence_length, batch_size)
     test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)
@@ -403,7 +334,7 @@ def prepare_data(args):
 
     train_x = np.concatenate(all_train_x, axis=0)
     train_y = np.concatenate(all_train_y, axis=0)
-    train_y = np.squeeze(train_y, axis=1)
+
 
     for batch_x, batch_y in val_ds:
         all_val_x.append(batch_x.numpy())  # Convert to numpy array
@@ -411,7 +342,7 @@ def prepare_data(args):
 
     val_x = np.concatenate(all_val_x, axis=0)
     val_y = np.concatenate(all_val_y, axis=0)
-    val_y = np.squeeze(val_y, axis=1)
+
 
     for batch_x, batch_y in test_ds:
         all_test_x.append(batch_x.numpy())  # Convert to numpy array
@@ -419,9 +350,10 @@ def prepare_data(args):
 
     test_x = np.concatenate(all_test_x, axis=0)
     test_y = np.concatenate(all_test_y, axis=0)
-    test_y = np.squeeze(test_y, axis=1)
 
     return (train_x, train_y), (val_x, val_y), (test_x, test_y)
+
+
 class LossPlotter(Callback):
     def __init__(self, save_dir, trial_id, execution_id):
         super().__init__()
@@ -446,6 +378,7 @@ class LossPlotter(Callback):
         plt.savefig(f"{self.save_dir}/trial_{self.trial_id}/exec_{self.execution_id}_loss.png")
         plt.close()
 
+
 class TrialExecutionLogger(Callback):
     def __init__(self, trial_id, execution_id, max_epochs):
         super().__init__()
@@ -459,11 +392,12 @@ class TrialExecutionLogger(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         print(f"[Trial {self.trial_id} | Exec {self.execution_id}] "
-              f"Epoch {epoch+1}/{self.max_epochs}, "
+              f"Epoch {epoch + 1}/{self.max_epochs}, "
               f"loss={logs.get('loss'):.4f}, val_loss={logs.get('val_loss'):.4f}")
 
     def on_train_end(self, logs=None):
         print(f"[Trial {self.trial_id} | Exec {self.execution_id}] Training finished\n")
+
 class MyTuner(keras_tuner.RandomSearch):
     def run_trial(self, trial, *args, **kwargs):
         original_callbacks = kwargs.pop("callbacks", [])
@@ -493,6 +427,8 @@ class MyTuner(keras_tuner.RandomSearch):
             print(f"=== Finished Trial {trial.trial_id}, Execution {execution} ===\n")
 
         return histories
+
+
 def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_size=32):
     (X_train, Y_train), (X_val, Y_val), _ = prepare_data(args)
 
@@ -502,7 +438,7 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
 
     tuner = MyTuner(
         hypermodel=lambda hp: build_model(hp, args),
-        objective=keras_tuner.Objective("test_loss", "min"),
+        objective=keras_tuner.Objective("val_loss", "min"),
         max_trials=max_trials,
         seed=args.seed,
         executions_per_trial=executions_per_trial,
@@ -516,7 +452,7 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
     )
 
     checkpoint = ModelCheckpoint(
-        filepath=os.path.join(save_path, "best_model.h5"),
+        filepath=os.path.join(save_path, "best_model.keras"),
         monitor="val_loss", save_weights_only=True,
         save_best_only=True, verbose=1
     )
@@ -531,7 +467,6 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
         callbacks=[early_stop, checkpoint],
         verbose=0  # 日志由 TrialExecutionLogger 打印
     )
-
 
     best_model = tuner.get_best_models(num_models=1)[0]
     best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -554,6 +489,8 @@ def run_search(args, max_trials=10, executions_per_trial=10, epochs=100, batch_s
 
     print(f"Best hyperparameters saved to {results_file}")
     return best_model, best_hps, tuner, save_path
+
+
 def collect_tuner_results(tuner_dir):
     results = []
     # read oracle.json，the score and index of trial
@@ -610,44 +547,53 @@ def collect_tuner_results(tuner_dir):
     print(f"The results saved on {output_path}")
     return df
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     # main entry
     parser = argparse.ArgumentParser()
 
     # general
-    parser.add_argument('--seed', type=int, default=777)
+    parser.add_argument('--seed', type=int, default=42)
 
     # directory structure
-    parser.add_argument('--data_path', type=str, default='./exp_data/norm_TOFEXP4.csv')
+    parser.add_argument('--data_source', type=str, choices=['ir', 'mmwave'], default='mmwave')
+    parser.add_argument('--data_path', type=str, default='./exp_data/norm_mmWaveEXP3.csv') #datasets/preprocessed-RadarEXP1.csv_
     parser.add_argument('--output_dir', type=str, default='results/normal_train/one')
     parser.add_argument('--running_data_dir', type=str, default='temp/')
-    parser.add_argument('--folds', type=int, default='6')
+    parser.add_argument('--folds', type=int, default='1')
 
     # basic info
     parser.add_argument('--training_part', type=float, default='0.7')
     parser.add_argument('--validing_part', type=float, default='0.15')
-    parser.add_argument('--time_windows', type=int, default='20')
+    parser.add_argument('--time_windows', type=int, default='12')
 
-    #model info
+    # model info
     parser.add_argument('--model', type=str, default='simple')
-    parser.add_argument('--hidden', type=int, default='4')
-    parser.add_argument('--num_filters', type=int, default='16')
-    parser.add_argument('--kernel_size', type=int, default='5')
-    parser.add_argument('--dense', type=int, default='8')
-    parser.add_argument('--epochs', type=int, default='20')
+    parser.add_argument('--hidden', type=int, default='2')
+    parser.add_argument('--num_filters', type=int, default='8')
+    parser.add_argument('--kernel_size', type=int, default='2')
+    parser.add_argument('--dense', type=int, default='32')
+    parser.add_argument('--epochs', type=int, default='50')
     parser.add_argument('--batch_size', type=int, default='32')
     parser.add_argument('--loss', type=str, default='mse')
     parser.add_argument('--optimizer', type=str, default='adam')
     parser.add_argument('--metrics', nargs='+', type=str, default=[rmse, 'mae'])
-    parser.add_argument('--dropout_rate', type=float, default='0.005')
+    parser.add_argument('--dropout_rate', type=float, default='0.01')
 
     args = parser.parse_args()
 
-    # pre-prepare dataset for remote server training
+    # optimizer is the normal training function, which has fixed parameter
+    #optimizer(args)
+    #
+
+    best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)
+    collect_tuner_results(results_path)
+
+
+    ## pre-prepare dataset for remote server training
     # df = pd.read_csv(args.data_path, header=None)
     # print("The whole dataset shape is:", df.shape)
-
+    #
     # for fold in range(1, 7):
     #     print(f"\n===== Training Fold {fold}/6 =====")
     #     args.folds = fold
@@ -659,16 +605,3 @@ if __name__ == '__main__':
     #     print("Train Y range:", Y_train[1].min(), Y_train[1].max())
     #     print("Val X range:", Y_val[0].min(), Y_val[0].max())
     #     print("Val Y range:", Y_val[1].min(), Y_val[1].max())
-
-    # optimizer is the normal training function, which has fixed parameter
-    optimizer(args)
-
-    #
-    # best_model, best_hps, tuner, results_path = run_search(args, max_trials=10, executions_per_trial=10, epochs=200)
-    # collect_tuner_results(results_path)
-
-
-
-
-
-

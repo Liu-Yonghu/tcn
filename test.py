@@ -6,6 +6,7 @@ import math
 import os
 import json
 import numpy as np
+import pandas as pd
 from tensorflow import keras
 from tensorflow.keras import models, Input
 import tensorflow as tf
@@ -64,6 +65,7 @@ def model_TCN(hidden, num_filters, k_size, dense):
     model = models.Model(x, dense_out)
     # model.load_weights(path_tcn)
     return model
+
 def rebuild_model(trial_dir, input_shape=(20, 64), ckpt_exec=8):
         # 1. 读取 trial.json
         trial_json = os.path.join(trial_dir, "trial.json")
@@ -85,7 +87,8 @@ def rebuild_model(trial_dir, input_shape=(20, 64), ckpt_exec=8):
         full_model = models.Model(inputs=x, outputs=tcn_output)
 
         # 3. 加载权重Tckpt_exec2.weights.h5
-        ckpt_file = os.path.join(trial_dir, f"ckpt_exec{ckpt_exec}.keras")
+        ckpt_file = os.path.join(trial_dir, f"ckpt_exec{ckpt_exec}.weights.h5")
+        print(ckpt_file)
         if os.path.exists(ckpt_file):
             full_model.load_weights(ckpt_file)
             print(f"Loaded weights from {ckpt_file}")
@@ -124,16 +127,27 @@ if __name__ == '__main__':
 
 
     # try to rebuild model
-    trial_dir = "./results/norm_TOFEXP1/6/trial_12"
-    model = rebuild_model(trial_dir, input_shape=(20, 64), ckpt_exec=1)
+    # trial_dir = "./results/std_TOFEXP1/6/trial_12"
+    # model = rebuild_model(trial_dir, input_shape=(20, 64), ckpt_exec=1)
+    #
+    # # 打印结构
+    # model.summary()
+    #
+    # # 示例推理
+    # dummy_input = np.random.rand(1, 20, 64).astype(np.float32)
+    # pred = model.predict(dummy_input)
+    # print("Dummy prediction:", pred)
+    # df = pd.read_csv("./exp_data/norm_TOFEXP1.csv")
+    # df = df.round(6)
+    # df.to_csv('./exp_data/norm_TOFEXP1_6.csv', index=False, header=False)
+    # print(df.head())
+    #
+    # num = input(" please input an int number")
 
-    # 打印结构
-    model.summary()
+    df = pd.read_csv("./exp_data/norm_mmWaveEXP2.csv").head(2155)
+    df.to_csv("./exp_data/norm_mmWaveEXP2_1.csv", index=False, header=False)
 
-    # 示例推理
-    dummy_input = np.random.rand(1, 20, 64).astype(np.float32)
-    pred = model.predict(dummy_input)
-    print("Dummy prediction:", pred)
+
 
 
 

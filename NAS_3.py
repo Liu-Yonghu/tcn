@@ -23,6 +23,8 @@ from keras_tuner import utils
 from keras_tuner.engine import base_tuner
 from keras_tuner.engine import tuner_utils
 from keras.preprocessing import timeseries_dataset_from_array
+from utils import load_dataset_mmwave,load_dataset_ir
+from tcn_model import model_TCN_complete, model_TCN_simple
 from scipy import stats
 
 
@@ -87,16 +89,12 @@ def create_tf_dataset(data_array, output_array, input_sequence_length, output_se
         batch_size=None,
     )
 
-    target_offset = math.floor(input_sequence_length / 2) + 1
+    target_offset = math.floor(input_sequence_length / 2)
     target_seq_length = output_sequence_length
 
-    targets = timeseries_dataset_from_array(
-        output_array[target_offset:, :],
-        None,
-        sequence_length=target_seq_length,
-        shuffle=False,
-        batch_size=None,
-    )
+    targets = output_array[target_offset:, :]
+
+    targets = tf.data.Dataset.from_tensor_slices(targets)
 
     input_len = len(list(inputs))
     target_len = len(list(targets))
@@ -109,19 +107,21 @@ def create_tf_dataset(data_array, output_array, input_sequence_length, output_se
     dataset = dataset.batch(batch_size, drop_remainder=True)
 
     return dataset
-def model_TCN(hidden, num_filters, k_size, dense):
-    x = layers.Input(shape=(20, 64))
-    tcn_out = TCN(nb_filters=num_filters, kernel_size=k_size, nb_stacks=1, dilations=[2 ** i for i in range(hidden)],
-                  padding='same', use_skip_connections='True', dropout_rate=0.01, return_sequences=False,
-                  activation='relu', kernel_initializer='glorot_uniform', use_layer_norm=True, name='tcn')(x)
-    flatten_out = layers.Flatten()(tcn_out)
-    dense_out1 = layers.Dense(dense)(flatten_out)
-    print("shape_out_tcn:", tcn_out.shape)
-    dense_out = layers.Dense(2)(dense_out1)
-    print("dense_out:", dense_out.shape)
-    model = models.Model(x, dense_out)
-    # model.load_weights(path_tcn)
-    return model
+
+# def model_TCN(hidden, num_filters, k_size, dense):
+#     x = layers.Input(shape=(4, 64))
+#     tcn_out = TCN(nb_filters=num_filters, kernel_size=k_size, nb_stacks=1, dilations=[2 ** i for i in range(hidden)],
+#                   padding='same', use_skip_connections='True', dropout_rate=0.01, return_sequences=False,
+#                   activation='relu', kernel_initializer='glorot_uniform', use_layer_norm=True, name='tcn')(x)
+#     flatten_out = layers.Flatten()(tcn_out)
+#     dense_out1 = layers.Dense(dense)(flatten_out)
+#     print("shape_out_tcn:", tcn_out.shape)
+#     dense_out = layers.Dense(2)(dense_out1)
+#     print("dense_out:", dense_out.shape)
+#     model = models.Model(x, dense_out)
+#     # model.load_weights(path_tcn)
+#     return model
+
 class RootMeanSquaredError(keras.metrics.Metric):
     def __init__(self, name="rmse", **kwargs):
         super().__init__(name=name, **kwargs)
@@ -136,19 +136,13 @@ class RootMeanSquaredError(keras.metrics.Metric):
     def reset_state(self):
         self.mse.reset_state()
 class MyHyperModel(keras_tuner.HyperModel):
-    def __init__(self, results_folder=None):
+    def __init__(self, results_folder=None, source="mmwave"):
         super().__init__()
         self.results_folder = results_folder
+        self.data_source = source
     def build(self, hp):
-        # Supponiamo che mlp_model sia la tua MLP già allenata e tcn_model sia la TCN
-        x = Input(shape=(20, 64))
-        tcn_model = model_TCN(hp.Choice("hidden", [2, 3, 4]), hp.Choice("nb_filters", [8, 16, 32]),
-                              hp.Choice("k_size", [2, 3, 4, 5]), hp.Choice("dense", [8, 16, 32]))
-        # Inserisci la sequenza concatenata nella TCN
-        tcn_output = tcn_model(x)
-        print("tcn_out:", tcn_output.shape)
-        full_model = models.Model(inputs=x, outputs=tcn_output)
-
+        full_model = model_TCN_complete(hp.Choice("hidden", [2, 3, 4]), hp.Choice("nb_filters", [8, 16, 32]),
+                              hp.Choice("k_size", [2, 3, 4, 5]), hp.Choice("dense", [8, 16, 32]), self.data_source)
         print("full_model.summary()")
         full_model.summary()
         return full_model
@@ -169,6 +163,8 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         # Average the loss across the batch size within an epoch
         student_loss_fn = losses.MeanSquaredError()
+        #student_loss_fn = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+
         # valid_loss = losses.mean_sqaured_error(name="valid_loss")
 
         # Specify the performance metric
@@ -189,7 +185,10 @@ class MyHyperModel(keras_tuner.HyperModel):
             with tf.GradientTape() as tape:
                 # Forward pass of student
                 student_predictions = student_model(x, training=True)
+                print(f"before squeeze: {student_predictions.shape}")
                 student_predictions = tf.squeeze(student_predictions)
+                print(f"after squeeze: {student_predictions.shape}")
+
                 student_loss = student_loss_fn(y, student_predictions)
 
             # Compute gradients
@@ -209,7 +208,6 @@ class MyHyperModel(keras_tuner.HyperModel):
             # Compute predictions
             y_prediction_val = student_model(x, training=False)
             y_prediction_val = tf.squeeze(y_prediction_val)
-            # val_loss = tf.reduce_mean(student_loss_fn(y, y_prediction_val))
             val_loss = student_loss_fn(y, y_prediction_val)
 
             # Update the metrics.
@@ -311,8 +309,9 @@ class MyHyperModel(keras_tuner.HyperModel):
             all_train_y.append(batch_y.numpy())  # Convert to numpy array
 
         train_x = np.concatenate(all_train_x, axis=0)
+        print(f"train_y shape: {train_x.shape}")
         train_y = np.concatenate(all_train_y, axis=0)
-        train_y = np.squeeze(train_y, axis=1)
+        print(f"train_y before squeeze shape: {train_y.shape}")
 
         for batch_x, batch_y in val_ds:
             all_val_x.append(batch_x.numpy())  # Convert to numpy array
@@ -320,7 +319,6 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         val_x = np.concatenate(all_val_x, axis=0)
         val_y = np.concatenate(all_val_y, axis=0)
-        val_y = np.squeeze(val_y, axis=1)
 
         for batch_x, batch_y in test_ds:
             all_test_x.append(batch_x.numpy())  # Convert to numpy array
@@ -328,12 +326,23 @@ class MyHyperModel(keras_tuner.HyperModel):
 
         test_x = np.concatenate(all_test_x, axis=0)
         test_y = np.concatenate(all_test_y, axis=0)
-        test_y = np.squeeze(test_y, axis=1)
+
+        print("Sample Y train:", train_y[0])
+        print("Sample prediction:", model.predict(train_x[0:1]))
+        print("Sample loss:", student_loss_fn(train_y[0:1], model.predict(train_x[0:1])).numpy())
 
         try:
             model.load_weights(os.path.join(save_dir, f"ckpt_exec{execution}.keras"))
-            model.compile(optimizer='adam', loss='mse',   metrics=[RootMeanSquaredError(name="rmse"),
-             tf.keras.metrics.MeanAbsoluteError(name="mae")])
+
+            # model.compile(optimizer='adam', loss='mse',   metrics=[RootMeanSquaredError(name="rmse"),
+            #  tf.keras.metrics.MeanAbsoluteError(name="mae")])
+
+            model.compile(
+                optimizer=tf.keras.optimizers.Adam(),
+                loss=tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE),
+                metrics=[RootMeanSquaredError(name="rmse"), tf.keras.metrics.MeanAbsoluteError(name="mae")]
+            )
+
             # Evaluate the model
             # best_test_loss = model.evaluate(test_x, test_y)
             best_test_loss = model.evaluate(test_x, test_y, return_dict=True)["loss"]
@@ -676,11 +685,13 @@ if __name__ == "__main__":
     batch_size = 32
     epochs = 3000
     directory = '.'
-    input_sequence_length = 20
+
+    source = "mmwave"
+    input_sequence_length = 12   # 1s for ir (4 frames), 3s for mmwave (12 frames), 5s for both sensors (20 frames)
     output_sequence_length = 1
 
     # Parent Directory path
-    parent_dir = "temp/norm_TOFEXP1/2"
+    parent_dir = "temp/mixed_mmWaveEXP3/1" # norm_TOFEXP1, std_TOFEXP1,mixed_TOFEXP1, norm_mmWaveEXP4, std_mmWaveEXP4, mixed_mmWaveEXP4
     exp = parent_dir.split("temp/", 1)[1]
 
     results_folder = os.path.join("autokeras_res", exp)
@@ -692,15 +703,27 @@ if __name__ == "__main__":
         print("Directory '%s' created" % directory)
 
     # create dataset
-    X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "train.csv","val.csv","test.csv")
+    X_train = Y_train = X_val = Y_val = X_test = Y_test = None
+    if source == "ir":
+        #X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset(parent_dir, "train.csv","val.csv","test.csv")
+        X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset_ir(parent_dir, 64)
+    elif source == "mmwave":
+        X_train, Y_train, X_val, Y_val, X_test, Y_test = load_dataset_mmwave(parent_dir, 3)
+    else:
+        raise ValueError(f"Unknown source type: {source}")
+
     train_ds = create_tf_dataset(X_train, Y_train, input_sequence_length, output_sequence_length, batch_size)
     val_ds = create_tf_dataset(X_val, Y_val, input_sequence_length, output_sequence_length, batch_size)
     test_ds = create_tf_dataset(X_test, Y_test, input_sequence_length, output_sequence_length, batch_size)
 
+    for step, (x_train, y_train) in enumerate(train_ds):
+        print(x_train.shape)
+        print(y_train.shape)
+
     # Tuner instatiation and search
     tuner = BayesianOptimization(
-        MyHyperModel(results_folder=results_folder),
-        objective=keras_tuner.Objective("test_loss", "min"),
+        MyHyperModel(results_folder=results_folder, source=source),
+        objective=keras_tuner.Objective("val_loss", "min"),
         max_trials=20,
         executions_per_trial=10,
         directory=path,

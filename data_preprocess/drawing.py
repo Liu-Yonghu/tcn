@@ -88,10 +88,52 @@ def animate_trajectory(coords, interval=50, save_path=None):
 
     if save_path:
         ani.save(save_path, writer="ffmpeg" if save_path.endswith(".mp4") else "imagemagick")
-        print(f"动画已保存到 {save_path}")
-
-    plt.savefig()
+        print(f"animation saved: {save_path}")
+    plt.show()
+    #plt.savefig()
     return ani
+
+
+def save_static_trajectory(coords, save_path="trajectory_static.png"):
+    """
+    保存静态轨迹图（按比例区分 Train / Val / Test）
+    :param coords: np.ndarray, shape (N, 2)
+    :param save_path: 保存路径 (.png)
+    """
+    n = len(coords)
+    idx_train = int(0.7 * n)
+    idx_val = int(0.85 * n)
+
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(0, 3)
+    ax.set_ylim(0, 3)
+    ax.set_xlabel("X room coordinate (m)")
+    ax.set_ylabel("Y room coordinate (m)")
+    ax.set_title("Ground Truth Trajectory (10 min)")
+    ax.grid(True, linestyle="--", alpha=0.5)
+
+    # 三段轨迹
+    ax.plot(coords[:idx_train, 0], coords[:idx_train, 1], c="ROYALBLUE", label="Train(0.7)")
+    ax.plot(coords[idx_train:idx_val, 0], coords[idx_train:idx_val, 1], c="ORANGE", label="Validation(0.15)")
+    ax.plot(coords[idx_val:, 0], coords[idx_val:, 1], c="GREEN", label="Test(0.15)")
+
+    # ax.plot(coords[:idx_train_, 0], coords[:idx_train_, 1], c="ROYALBLUE", label="Train(0.7)")
+    # ax.plot(coords[idx_train:idx_val_, 0], coords[idx_train:idx_val_, 1], c="ORANGE", label="Validation(0.15)")
+    # ax.plot(coords[idx_val:, 0], coords[idx_val:, 1], c="GREEN", label="Test(0.15)")
+
+    #ax.plot(coords[:n, 0], coords[:n, 1], c="ROYALBLUE", label="Train")
+
+
+    # 起止点
+    ax.plot(coords[0, 0], coords[0, 1], 'ro', markersize=8, label="Start")
+    ax.plot(coords[-1, 0], coords[-1, 1], 'rx', markersize=8, label="End")
+
+    ax.legend(loc="best")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close(fig)
+    print(f"Static trajectory saved: {save_path}")
 
 def analyze_dataset(file_path, name="dataset", jump_thresh=0.3):
     df = pd.read_csv(file_path, names=["t", "X", "Y", "valid"])
@@ -227,30 +269,25 @@ if __name__ == "__main__":
     # data = pd.read_csv('./raw_data/features.csv', usecols=range(1, 65)).to_numpy()
     # frames = (data/1000).reshape(-1, 8, 8)
 
-    data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
-    frames = (data).reshape(-1, 8, 8)
-
-    # data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
+    # data = pd.read_csv('./raw_data/raw.csv', usecols=range(1, 65)).to_numpy()
     # frames = (data).reshape(-1, 8, 8)
-    isHandled =None #"zScore" "minMax"
-
-    check_one_frame(data[0], "./animation/std_TOFEXP4.jpg", isHandled)
-    animate_depth(frames, "./animation/std_TOFEXP4.mp4", isHandled)
-
-
-    # labels = pd.read_csv('../exp_data/std_TOFEXP4.csv', usecols=range(64, 66)).to_numpy()
-    # print(labels.shape)
-    # recordmin = []
-    # recordmax = []
-    # for idx, row in enumerate(labels):
-    #     if (row[0]< 0) or (row[1] < 0):
-    #         recordmin.append((idx, row))
-    #     if (row[0] > 3) or (row[1] > 3):
-    #         recordmax.append((idx, row))
     #
-    # print(recordmin)
-    # print(recordmax)
-    # animate_trajectory(labels, interval=30,)
+    # # data = pd.read_csv('../exp_data/std_TOFEXP1.csv', usecols=range(0, 64)).to_numpy()
+    # # frames = (data).reshape(-1, 8, 8)
+    # isHandled =None #"zScore" "minMax"
+    #
+    # check_one_frame(data[0], "./animation/std_TOFEXP4.jpg", isHandled)
+    # animate_depth(frames, "./animation/std_TOFEXP4.mp4", isHandled)
 
-    #compare_datasets("./raw_data/exp3_1h_ultrasound.csv", "./raw_data/exp4_1h_ultrasound.csv", jump_thresh=0.3)
+
+    labels = pd.read_csv('../exp_data/norm_TOFEXP1.csv', header=None, usecols=range(64, 66)).to_numpy()
+    # labels = pd.read_csv('../exp_data/norm_mmWaveEXP2.csv', header=None, usecols=range(3, 5)).to_numpy()
+    print(labels.shape)
+    print(labels[:5])
+
+    #labels = labels[:2155]
+    #animate_trajectory(labels, interval=30,)
+    save_static_trajectory(labels, save_path="animation/norm_TOFEXP1_trajectory.png")
+
+    # compare_datasets("./raw_data/exp3_1h_ultrasound.csv", "./raw_data/exp4_1h_ultrasound.csv", jump_thresh=0.3)
 

@@ -9,6 +9,9 @@ autokeras_res
 __pycache__
 logs/
 downloads/
+E1/
+figures/
+data_check/
 
 
 
